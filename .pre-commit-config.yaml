@@ -1,0 +1,78 @@
+exclude: ^(.*\/?Cargo\.lock$)
+fail_fast: true
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-check  # `cargo check` first as it's lightweight(for libs and bins only)
+        name: cargo check
+        entry: cargo check --workspace
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: cargo-fmt
+        # runs when there is at least one .rs staged that isn’t filtered by the global exclude
+        name: cargo fmt
+        entry: |
+          bash -c '
+            cargo metadata --format-version 1 --no-deps |
+            jq -r ".packages[].name" |
+            while read -r crate; do
+              cargo fmt -p "$crate"
+            done
+          '
+        language: system
+        # Despite pass_filenames being false, this hook only runs if there is at least one .rs file staged not excluded
+        # by the global exclude
+        pass_filenames: false
+        files: \.rs$
+        require_serial: true
+
+      - id: taplo-fmt
+        name: taplo fmt (Cargo.toml)
+        entry: taplo fmt
+        language: system
+        pass_filenames: true
+        files: (^|/)Cargo\.toml$
+
+      - id: cargo-machete
+        name: cargo machete
+        entry: cargo machete
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --verbose
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --workspace --all-targets --all-features
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+
+  #     - id: shellcheck
+  #       name: shellcheck (bash)
+  #       entry: shellcheck
+  #       language: system
+  #       types: [shell]
+
+  # - repo: https://github.com/astral-sh/ruff-pre-commit
+  #   rev: v0.14.14
+  #   hooks:
+  #     - id: ruff-check
+  #       name: ruff (python)
+  #       args: [--fix]
+  #       types: [python]
+  #     - id: ruff-format
+  #       name: ruff format (python)
+  #       types: [python]

@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/shush-core", "crates/shush-bin"]
+resolver = "2"
