@@ -67,17 +67,17 @@ pub fn parse_tmux_event(line: &str) -> TmuxEvent {
         let msg = parts.get(3..).map(|s| s.join(" ")).unwrap_or_default();
         return TmuxEvent::Error(time, window, pane, msg);
     }
-    if let Some(rest) = line.strip_prefix("%output ") {
-        if let Some(pane_start) = rest.strip_prefix('%') {
-            let data_start = pane_start
-                .find(' ')
-                .map(|i| i + 1)
-                .unwrap_or(pane_start.len());
-            let pane = pane_start[..data_start.saturating_sub(1)].to_string();
-            let data_str = &pane_start[data_start..];
-            let data = decode_octal(data_str);
-            return TmuxEvent::Output { pane, data };
-        }
+    if let Some(rest) = line.strip_prefix("%output ")
+        && let Some(pane_start) = rest.strip_prefix('%')
+    {
+        let data_start = pane_start
+            .find(' ')
+            .map(|i| i + 1)
+            .unwrap_or(pane_start.len());
+        let pane = pane_start[..data_start.saturating_sub(1)].to_string();
+        let data_str = &pane_start[data_start..];
+        let data = decode_octal(data_str);
+        return TmuxEvent::Output { pane, data };
     }
     if let Some(name) = line.strip_prefix("%window-add ") {
         return TmuxEvent::WindowAdd(name.to_string());
@@ -184,5 +184,27 @@ mod tests {
             parse_tmux_event("%unrecognized foo bar"),
             TmuxEvent::Unknown("%unrecognized foo bar".to_string())
         );
+    }
+
+    #[test]
+    fn parse_output_with_empty_data() {
+        match parse_tmux_event("%output %1 ") {
+            TmuxEvent::Output { pane, data } => {
+                assert_eq!(pane, "1");
+                assert!(data.is_empty(), "empty data field should produce empty vec");
+            }
+            other => panic!("expected Output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_output_with_named_pane() {
+        match parse_tmux_event("%output %my-pane.0 hello") {
+            TmuxEvent::Output { pane, data } => {
+                assert_eq!(pane, "my-pane.0");
+                assert_eq!(data, b"hello");
+            }
+            other => panic!("expected Output, got {other:?}"),
+        }
     }
 }

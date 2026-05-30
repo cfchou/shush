@@ -47,10 +47,11 @@ fn hex_val(b: u8) -> u8 {
 /// so command boundaries are detectable in the tmux output stream.
 /// It's a control sequence from the ANSI/VT escape code standard used for
 /// terminal communication:
-/// * ESC(0x1b) — escape character that starts the sequence
-/// _(underscore) — designates an APC sequence
-/// Data — application-specific payload
-/// * ESC\(0x1b 0x5c) — terminates the sequence
+///   * ESC(0x1b) — escape character that starts the sequence
+///   * _(underscore) — designates an APC sequence
+///   * Data — application-specific payload
+///   * ESC\(0x1b 0x5c) — terminates the sequence
+///
 /// These markers are invisible to the shell (the terminal interprets them, not the shell)
 /// ```text
 /// ESC_BEGIN_<nonce>ESC\  <- Command start marker
@@ -273,5 +274,56 @@ mod tests {
         // Now feed the end marker
         let events = detector.feed(m2.as_bytes());
         assert_eq!(events, vec![MarkerEvent::End(nonce2)]);
+    }
+
+    #[test]
+    fn detect_marker_split_at_nonce_boundary() {
+        let mut detector = MarkerDetector::new();
+        let nonce = generate_nonce();
+        let marker = format!("\x1b_BEGIN_{}\x1b\\", nonce.hex());
+
+        // Split exactly at the nonce boundary: after ESC _ BEGIN_
+        let prefix_len = 2 + 6; // ESC + '_' + "BEGIN_"
+        let chunk1 = &marker.as_bytes()[..prefix_len];
+        let chunk2 = &marker.as_bytes()[prefix_len..];
+
+        let _ = detector.feed(chunk1);
+        let events = detector.feed(chunk2);
+        assert_eq!(
+            events,
+            vec![MarkerEvent::Start(nonce)],
+            "marker split at nonce boundary"
+        );
+    }
+
+    #[test]
+    fn detect_markers_with_garbage_between() {
+        let mut detector = MarkerDetector::new();
+        let nonce = generate_nonce();
+
+        let start = format!("\x1b_BEGIN_{}\x1b\\", nonce.hex());
+        let end = format!("\x1b_END_{}\x1b\\", nonce.hex());
+        let garbage = b"random noise here!!!\x01\x02\x03";
+
+        let stream = [start.as_bytes(), garbage, end.as_bytes()].concat();
+        let events = detector.feed(&stream);
+
+        assert_eq!(
+            events,
+            vec![MarkerEvent::Start(nonce.clone()), MarkerEvent::End(nonce)],
+            "detector should find both markers ignoring garbage"
+        );
+    }
+
+    #[test]
+    fn inject_preserves_command_with_special_chars() {
+        let injector = MarkerInjector::new();
+        let cmd = r#"echo "hello" | grep 'world' && ls `pwd`"#;
+        let (wrapped, _) = injector.inject(cmd);
+
+        assert!(
+            wrapped.contains(cmd),
+            "wrapped command should contain original verbatim"
+        );
     }
 }

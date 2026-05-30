@@ -2,8 +2,8 @@
 target/
 
 # Node
-frontend/node_modules/
-frontend/dist/
+node_modules/
+dist/
 
 # IDE
 .DS_Store
@@ -11,5 +11,15 @@ frontend/dist/
 *.swp
 *.swo
 
+# AI
+.opencode
+.agents
+skills-lock.json
+
 # Temp
 tmp/
+
+# env
+.env
+mise.toml
+

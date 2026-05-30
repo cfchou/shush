@@ -32,6 +32,21 @@ pub struct CommandCard {
     pub resolved_by: Option<String>,
 }
 
+impl CommandCard {
+    pub fn new(command: String) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            command,
+            state: CommandState::Pending,
+            exit_code: None,
+            output: String::new(),
+            created_at: Utc::now(),
+            resolved_at: None,
+            resolved_by: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: Uuid,
@@ -41,4 +56,20 @@ pub struct Session {
     pub yolo: bool,
     pub current_command: Option<CommandCard>,
     pub created_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_card_initial_state() {
+        let card = CommandCard::new("echo hello".to_string());
+        assert_eq!(card.command, "echo hello");
+        assert_eq!(card.state, CommandState::Pending);
+        assert!(card.exit_code.is_none());
+        assert!(card.resolved_at.is_none());
+        assert!(card.resolved_by.is_none());
+        assert!(card.output.is_empty());
+    }
 }
