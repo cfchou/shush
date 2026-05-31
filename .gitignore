@@ -4,6 +4,8 @@ target/
 # Node
 node_modules/
 dist/
+playwright-report/
+test-results/
 
 # IDE
 .DS_Store
@@ -19,8 +21,8 @@ skills-lock.json
 
 # Temp
 tmp/
+.remote-ssh-*
 
 # env
 .env
 mise.toml
-

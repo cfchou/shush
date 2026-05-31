@@ -43,12 +43,12 @@ This issue is about making that remote FE attach/read/reconnect path work reliab
 
 ## Acceptance criteria
 
-- [ ] Remote FE attach path is covered by focused backend tests, not only browser tests
-- [ ] Remote monitor WebSocket receives an initial snapshot for SSH-backed sessions
-- [ ] Remote live tmux output appears in the browser monitor flow for SSH-backed sessions
+- [x] Remote FE attach path is covered by focused backend tests, not only browser tests
+- [x] Remote monitor WebSocket receives an initial snapshot for SSH-backed sessions
+- [x] Remote live tmux output appears in the browser monitor flow for SSH-backed sessions
 - [ ] Remote reconnect after disconnect or server restart succeeds and rehydrates terminal state
 - [ ] `SHUSH_E2E_REMOTE=1 npm run test:e2e` passes from `frontend/`
-- [ ] Docs no longer state that full remote browser stream behavior is outside validated scope
+- [x] Docs no longer state that full remote browser stream behavior is outside validated scope
 
 ## Blocked by
 

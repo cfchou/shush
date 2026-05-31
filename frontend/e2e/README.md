@@ -18,6 +18,10 @@ Remote monitor coverage is included in the spec but gated behind env flags so lo
 Enable remote coverage after setting up issue-05 remote target:
 
 ```bash
+./scripts/remote_ssh_target.sh
+```
+
+```bash
 SHUSH_E2E_REMOTE=1 npm run test:e2e
 ```
 

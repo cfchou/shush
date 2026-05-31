@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+IMAGE="shush-remote-ssh:dev"
+CONTAINER="shush-remote-ssh"
+PORT="2222"
+KEY_FILE="${ROOT_DIR}/.remote-ssh-key"
+PUB_FILE="${KEY_FILE}.pub"
+HOME_DIR="${ROOT_DIR}/.remote-ssh-home"
+SSH_CONFIG="${HOME_DIR}/.ssh/config"
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [start|stop|cleanup]
+
+Commands:
+  start    Build image, start container, and verify SSH/tmux (default)
+  stop     Stop and remove the remote SSH container
+  cleanup  Stop/remove container and delete local generated SSH artifacts
+
+Examples:
+  ./scripts/remote_ssh_target.sh
+  ./scripts/remote_ssh_target.sh start
+  ./scripts/remote_ssh_target.sh stop
+  ./scripts/remote_ssh_target.sh cleanup
+EOF
+}
+
+stop_container() {
+  docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+  echo "Stopped container: ${CONTAINER}"
+}
+
+cleanup_all() {
+  stop_container
+  rm -f "${KEY_FILE}" "${PUB_FILE}" >/dev/null 2>&1 || true
+  rm -rf "${HOME_DIR}" >/dev/null 2>&1 || true
+  echo "Removed generated SSH artifacts: ${KEY_FILE}, ${HOME_DIR}"
+}
+
+start_target() {
+  if [[ ! -f "${KEY_FILE}" ]]; then
+    ssh-keygen -t ed25519 -N "" -f "${KEY_FILE}" -C "shush-remote-dev" >/dev/null
+  fi
+
+  mkdir -p "${HOME_DIR}/.ssh"
+  chmod 700 "${HOME_DIR}/.ssh"
+  cat > "${SSH_CONFIG}" <<CFG
+Host shush-docker
+  HostName 127.0.0.1
+  User shush
+  Port ${PORT}
+  IdentityFile ${KEY_FILE}
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+CFG
+  chmod 600 "${SSH_CONFIG}"
+
+  AUTHORIZED_KEY="$(cat "${PUB_FILE}")"
+
+  docker build -t "${IMAGE}" "${ROOT_DIR}/docker/remote-ssh"
+  docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+  docker run -d --name "${CONTAINER}" -p "${PORT}:22" -e "AUTHORIZED_KEY=${AUTHORIZED_KEY}" "${IMAGE}" >/dev/null
+
+  for _ in {1..30}; do
+    if ssh -F "${SSH_CONFIG}" shush-docker "echo ok" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+
+  ssh -F "${SSH_CONFIG}" shush-docker "tmux -V >/dev/null"
+
+  cat <<EOF
+Remote SSH target ready.
+
+SSH config: ${SSH_CONFIG}
+
+Run remote E2E:
+  cd frontend
+  SHUSH_E2E_REMOTE=1 npm run test:e2e
+EOF
+}
+
+COMMAND="${1:-start}"
+
+case "${COMMAND}" in
+start)
+  start_target
+  ;;
+stop)
+  stop_container
+  ;;
+cleanup)
+  cleanup_all
+  ;;
+help|-h|--help)
+  usage
+  ;;
+*)
+  echo "Unknown command: ${COMMAND}" >&2
+  usage
+  exit 1
+  ;;
+esac

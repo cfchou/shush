@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 use tokio::{io::AsyncReadExt, sync::broadcast, task::JoinHandle};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 const FE_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -47,12 +48,14 @@ impl FeMasterHandle {
             ]);
             cmd
         } else {
+            info!(session_host = %session_host, session_name = %session_name, "spawning remote FE attach");
             let mut cmd = CommandBuilder::new("ssh");
             if let Ok(config) = std::env::var("SHUSH_SSH_CONFIG") {
                 if !config.is_empty() {
                     cmd.args(["-F", &config]);
                 }
             }
+            cmd.args(["-o", "BatchMode=yes"]);
             cmd.args(["-tt", session_host, "tmux", "-L", remote_tmux::TMUX_SOCKET]);
             cmd.args(["attach", "-r", "-t", session_name]);
             cmd
@@ -62,6 +65,8 @@ impl FeMasterHandle {
             .slave
             .spawn_command(cmd)
             .map_err(|e| format!("failed to spawn FE tmux attach: {e}"))?;
+
+        debug!(session_host = %session_host, session_name = %session_name, "FE attach process spawned");
 
         let master_fd: RawFd = pair
             .master
@@ -117,12 +122,17 @@ impl FeMasterHandle {
         });
 
         let reader_sender = sender.clone();
+        let reader_session_name = session_name.to_string();
+        let reader_session_host = session_host.to_string();
         let reader = tokio::spawn(async move {
             let mut reader = tokio::io::BufReader::new(stdout);
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf).await {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        warn!(session_host = %reader_session_host, session_name = %reader_session_name, "FE reader reached EOF");
+                        break;
+                    }
                     Ok(n) => {
                         let _ = reader_sender.send(buf[..n].to_vec());
                     }
@@ -134,7 +144,10 @@ impl FeMasterHandle {
                     {
                         tokio::time::sleep(Duration::from_millis(10)).await;
                     }
-                    Err(_) => break,
+                    Err(err) => {
+                        warn!(session_host = %reader_session_host, session_name = %reader_session_name, error = %err, "FE reader failed");
+                        break;
+                    }
                 }
             }
         });
@@ -163,6 +176,7 @@ impl FeMasterHandle {
     }
 
     async fn shutdown(&self) {
+        debug!(session_host = %self.session_host, session_name = %self.session_name, "shutting down FE master handle");
         if let Some(task) = self.reader_task.lock().await.take() {
             task.abort();
         }

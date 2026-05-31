@@ -179,16 +179,69 @@ async fn handle_socket(
 
 #[cfg(test)]
 mod tests {
+    use std::{env, path::Path};
+
     use axum::{
         body::Body,
         http::{self, Request, StatusCode},
     };
+    use base64::Engine;
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tower::util::ServiceExt;
     use uuid::Uuid;
 
     use crate::session_manager::SessionManager;
+
+    struct RemoteTestEnv {
+        host: String,
+        ssh_config: String,
+    }
+
+    fn remote_test_env() -> Option<RemoteTestEnv> {
+        if env::var("SHUSH_E2E_REMOTE").ok().as_deref() != Some("1") {
+            return None;
+        }
+
+        let host = env::var("SHUSH_E2E_REMOTE_HOST").unwrap_or_else(|_| "shush-docker".to_string());
+        let config = env::var("SHUSH_SSH_CONFIG").unwrap_or_else(|_| {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            root.join(".remote-ssh-home/.ssh/config")
+                .to_string_lossy()
+                .to_string()
+        });
+        if !Path::new(&config).exists() {
+            return None;
+        }
+
+        Some(RemoteTestEnv {
+            host,
+            ssh_config: config,
+        })
+    }
+
+    async fn remote_tmux_output(env: &RemoteTestEnv, args: &[&str]) -> Option<String> {
+        let output = tokio::process::Command::new("ssh")
+            .args(["-F", &env.ssh_config, &env.host, "tmux", "-L", "shush"])
+            .args(args)
+            .output()
+            .await
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    async fn remote_tmux_status(env: &RemoteTestEnv, args: &[&str]) -> bool {
+        tokio::process::Command::new("ssh")
+            .args(["-F", &env.ssh_config, &env.host, "tmux", "-L", "shush"])
+            .args(args)
+            .status()
+            .await
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
 
     #[tokio::test]
     async fn list_sessions_returns_empty() {
@@ -501,5 +554,117 @@ mod tests {
 
         let _ = ws1.send(WsMessage::Close(None)).await;
         let _ = ws2.send(WsMessage::Close(None)).await;
+    }
+
+    #[tokio::test]
+    async fn websocket_remote_connect_sends_snapshot_message() {
+        let Some(remote) = remote_test_env() else {
+            return;
+        };
+
+        if !remote_tmux_status(&remote, &["-V"]).await {
+            return;
+        }
+
+        let mgr = SessionManager::new();
+        let session = mgr.create("ws-remote-snapshot".to_string(), remote.host.clone());
+        let app = super::create_app(mgr);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let url = format!("ws://{}/api/sessions/{}/stream", addr, session.id);
+        let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+
+        let frame = ws.next().await.unwrap().unwrap();
+        let text = match frame {
+            WsMessage::Text(t) => t,
+            other => panic!("expected text frame, got {other:?}"),
+        };
+        let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(payload["type"], "snapshot");
+        assert!(payload["data"].is_string());
+
+        let _ = ws.send(WsMessage::Close(None)).await;
+    }
+
+    #[tokio::test]
+    async fn websocket_remote_receives_terminal_frames() {
+        let Some(remote) = remote_test_env() else {
+            return;
+        };
+
+        if !remote_tmux_status(&remote, &["-V"]).await {
+            return;
+        }
+
+        let mgr = SessionManager::new();
+        let session = mgr.create("ws-remote-live".to_string(), remote.host.clone());
+        let app = super::create_app(mgr);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let url = format!("ws://{}/api/sessions/{}/stream", addr, session.id);
+        let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+
+        let first = ws.next().await.unwrap().unwrap();
+        let first_text = match first {
+            WsMessage::Text(t) => t,
+            other => panic!("expected text frame, got {other:?}"),
+        };
+        let first_payload: serde_json::Value = serde_json::from_str(&first_text).unwrap();
+        assert_eq!(first_payload["type"], "snapshot");
+
+        let marker = "ws-remote-live-marker";
+        let _ = remote_tmux_output(
+            &remote,
+            &[
+                "send-keys",
+                "-t",
+                &session.name,
+                &format!("echo {marker}"),
+                "Enter",
+            ],
+        )
+        .await;
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut saw_marker = false;
+        while tokio::time::Instant::now() < deadline {
+            let Some(message) = ws.next().await else {
+                break;
+            };
+            let frame = message.unwrap();
+            let text = match frame {
+                WsMessage::Text(t) => t,
+                _ => continue,
+            };
+            let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+            if payload["type"] != "terminal" {
+                continue;
+            }
+            let encoded = payload["data"].as_str().unwrap();
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap();
+            let decoded = String::from_utf8_lossy(&decoded);
+            if decoded.contains(marker) {
+                saw_marker = true;
+                break;
+            }
+        }
+
+        assert!(
+            saw_marker,
+            "expected remote terminal frame with marker output"
+        );
+        let _ = ws.send(WsMessage::Close(None)).await;
     }
 }

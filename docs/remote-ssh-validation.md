@@ -15,7 +15,14 @@ This document describes the local Ubuntu Docker target used to validate `host = 
 ## What It Does Not Validate
 
 - Full remote command execution pipeline (`tmux -CC attach` path)
-- Full remote browser stream behavior beyond command reachability checks
+- Full remote browser stream behavior in all desktop/browser environments
+
+## Remote Monitor Stream Status
+
+- Remote FE monitor stream now has dedicated backend coverage under `server.rs` tests:
+  - remote WebSocket connect receives `snapshot`
+  - remote live output receives `terminal` frames
+- Remote browser E2E remains environment-gated (`SHUSH_E2E_REMOTE=1`) because it requires the Docker SSH target and local browser runtime prerequisites.
 
 ## Prerequisites
 

@@ -45,3 +45,8 @@ Smaller number in the filename represents higher priority.
 
 
 - docs/issues/*
+
+# Scripts
+
+- One-command remote E2E run with auto-stop:
+    * `./scripts/run_remote_e2e.sh`
