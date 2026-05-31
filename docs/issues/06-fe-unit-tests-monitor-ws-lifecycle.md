@@ -40,12 +40,12 @@ This issue is **unit-test only**. Do not redesign monitor UX, and do not expand 
 
 ## Acceptance criteria
 
-- [ ] `frontend/src/monitor/monitor.test.ts` includes unit tests for monitor WS lifecycle and message handling
-- [ ] Tests assert protocol selection (`ws` vs `wss`) and session-id encoding in stream URL
-- [ ] Tests verify snapshot vs terminal message side effects on terminal methods
-- [ ] Tests verify reconnect scheduling and backoff progression after close events
-- [ ] Tests verify no reconnect scheduling after `beforeunload`
-- [ ] `cd frontend && npm test` passes
+- [x] `frontend/src/monitor/monitor.test.ts` includes unit tests for monitor WS lifecycle and message handling
+- [x] Tests assert protocol selection (`ws` vs `wss`) and session-id encoding in stream URL
+- [x] Tests verify snapshot vs terminal message side effects on terminal methods
+- [x] Tests verify reconnect scheduling and backoff progression after close events
+- [x] Tests verify no reconnect scheduling after `beforeunload`
+- [x] `cd frontend && npm test` passes
 
 ## Out of scope
 
