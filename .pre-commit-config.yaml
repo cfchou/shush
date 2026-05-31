@@ -76,6 +76,14 @@ repos:
         files: ^frontend/.*\.(ts|css)$
         require_serial: true
 
+      - id: frontend-test
+        name: frontend test
+        entry: bash -c 'cd frontend && npm run test'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*(\.(ts|css|json)$|/package\.json$|/package-lock\.json$|/biome\.json$)
+        require_serial: true
+
   #     - id: shellcheck
   #       name: shellcheck (bash)
   #       entry: shellcheck

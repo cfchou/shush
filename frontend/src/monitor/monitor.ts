@@ -1,5 +1,6 @@
 import "./monitor.css";
-import { TerminalView, decodeBase64Bytes } from "./terminal";
+import { decodeBase64Bytes, reconnectDelayMs } from "./stream_utils";
+import { TerminalView } from "./terminal";
 
 type StreamMessage =
   | { type: "snapshot"; data: string }
@@ -65,7 +66,7 @@ export function renderMonitor(root: HTMLElement, sessionId: string): void {
 
     ws.addEventListener("close", () => {
       if (closed) return;
-      const delay = Math.min(30000, 1000 * 2 ** attempt);
+      const delay = reconnectDelayMs(attempt);
       attempt += 1;
       window.setTimeout(connect, delay);
     });

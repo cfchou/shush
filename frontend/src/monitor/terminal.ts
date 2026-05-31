@@ -2,6 +2,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
+export { decodeBase64Bytes } from "./stream_utils";
+
 export class TerminalView {
   private readonly term: Terminal;
   private readonly fitAddon: FitAddon;
@@ -33,13 +35,4 @@ export class TerminalView {
   fit(): void {
     this.fitAddon.fit();
   }
-}
-
-export function decodeBase64Bytes(data: string): Uint8Array {
-  const binary = atob(data);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    out[i] = binary.charCodeAt(i);
-  }
-  return out;
 }
