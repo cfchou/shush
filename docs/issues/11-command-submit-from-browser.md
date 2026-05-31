@@ -39,8 +39,8 @@ Priority: medium
 
 ## Blocked by
 
-- Issue 08: Command queue + REST (`docs/issues/08-command-queue-submit-approve-deny.md`) — provides the submit REST endpoint
-- Issue 09: Monitor card list (`docs/issues/09-monitor-card-list.md`) — users need to see the result of their submission
+- Issue 09: Command queue + REST (`docs/issues/09-command-queue-submit-approve-deny.md`) — provides the submit REST endpoint
+- Issue 10: Monitor card list (`docs/issues/10-monitor-card-list.md`) — users need to see the result of their submission
 
 ## References
 

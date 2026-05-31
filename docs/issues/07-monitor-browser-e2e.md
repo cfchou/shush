@@ -34,13 +34,13 @@ This issue should validate the **existing** monitor experience end-to-end, not r
 
 ## Acceptance criteria
 
-- [ ] Browser automation can open `/monitor/:sessionId` directly and load the monitor page successfully
-- [ ] Initial tmux terminal state is visible in the browser after connect
-- [ ] New tmux output appears in the browser terminal during the same test run
-- [ ] Two browser tabs can connect to the same session successfully
-- [ ] Reconnect after close or temporary server disruption succeeds and rehydrates terminal state
-- [ ] Browser navigation back to dashboard works
-- [ ] Failure artifacts are preserved for debugging
+- [x] Browser automation can open `/monitor/:sessionId` directly and load the monitor page successfully
+- [x] Initial tmux terminal state is visible in the browser after connect
+- [x] New tmux output appears in the browser terminal during the same test run
+- [x] Two browser tabs can connect to the same session successfully
+- [x] Reconnect after close or temporary server disruption succeeds and rehydrates terminal state
+- [x] Browser navigation back to dashboard works
+- [x] Failure artifacts are preserved for debugging
 
 ## Blocked by
 

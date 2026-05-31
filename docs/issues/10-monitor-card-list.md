@@ -19,7 +19,7 @@ Priority: medium
 - Action buttons:
   - Pending cards: [Approve] [Deny] buttons → calls `POST ?action=approve` / `?action=deny`
   - Executing cards: [Abort] button → calls `POST ?action=abort`
-  - (Abort button is wired here, actual abort logic from Issue 10)
+- (Abort button is wired here, actual abort logic from Issue 12)
 - Auto-scroll to newest card when added
 - Visual transition animation (optional, CSS transition)
 
@@ -52,7 +52,7 @@ Priority: medium
 ## Blocked by
 
 - Issue 03: FE master + terminal stream (`docs/issues/03-fe-master-terminal-stream.md`) — provides WS channel and monitor view layout
-- Issue 08: Command queue + REST (`docs/issues/08-command-queue-submit-approve-deny.md`) — provides REST endpoints and WS card push
+- Issue 09: Command queue + REST (`docs/issues/09-command-queue-submit-approve-deny.md`) — provides REST endpoints and WS card push
 
 ## References
 
