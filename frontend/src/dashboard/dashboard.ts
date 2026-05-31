@@ -1,4 +1,4 @@
-import { listSessions, createSession, deleteSession } from "../api";
+import { createSession, deleteSession, listSessions } from "../api";
 import type { Session } from "../types";
 import "./dashboard.css";
 

@@ -60,6 +60,22 @@ repos:
         always_run: true
         require_serial: true
 
+      - id: frontend-lint
+        name: frontend lint
+        entry: bash -c 'cd frontend && npm run lint'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|css)$
+        require_serial: true
+
+      - id: frontend-format-check
+        name: frontend format check
+        entry: bash -c 'cd frontend && npm run format:check'
+        language: system
+        pass_filenames: false
+        files: ^frontend/.*\.(ts|css)$
+        require_serial: true
+
   #     - id: shellcheck
   #       name: shellcheck (bash)
   #       entry: shellcheck

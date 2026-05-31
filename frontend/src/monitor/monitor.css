@@ -2,8 +2,11 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: radial-gradient(1200px 500px at 80% -10%, #1f2c40 0%, transparent 60%),
-    #0a0d12;
+  background: radial-gradient(
+      1200px 500px at 80% -10%,
+      #1f2c40 0%,
+      transparent 60%
+    ), #0a0d12;
   color: #d7dde8;
 }
 

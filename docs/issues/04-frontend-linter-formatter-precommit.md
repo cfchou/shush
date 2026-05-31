@@ -40,12 +40,12 @@ This issue is about **tooling and enforcement**, not redesigning frontend code.
 
 ## Acceptance criteria
 
-- [ ] Frontend lint command exists and passes on the current codebase
-- [ ] Frontend format command exists and can rewrite code consistently
-- [ ] Frontend format-check command exists and passes on the current codebase
-- [ ] Pre-commit is updated to run frontend lint/format validation
-- [ ] Generated frontend output is excluded from lint/format scope where appropriate
-- [ ] The setup is documented through config and package scripts clearly enough for routine local use
+- [x] Frontend lint command exists and passes on the current codebase
+- [x] Frontend format command exists and can rewrite code consistently
+- [x] Frontend format-check command exists and passes on the current codebase
+- [x] Pre-commit is updated to run frontend lint/format validation
+- [x] Generated frontend output is excluded from lint/format scope where appropriate
+- [x] The setup is documented through config and package scripts clearly enough for routine local use
 
 ## Blocked by
 

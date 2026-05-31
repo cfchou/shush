@@ -10,7 +10,7 @@ export async function listSessions(): Promise<Session[]> {
 
 export async function createSession(
   name: string,
-  host: string
+  host: string,
 ): Promise<Session> {
   const res = await fetch(`${BASE}/sessions`, {
     method: "POST",

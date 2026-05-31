@@ -35,7 +35,7 @@ export function renderMonitor(root: HTMLElement, sessionId: string): void {
 
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(
-      `${proto}://${window.location.host}/api/sessions/${encodeURIComponent(sessionId)}/stream`
+      `${proto}://${window.location.host}/api/sessions/${encodeURIComponent(sessionId)}/stream`,
     );
 
     ws.addEventListener("open", () => {
