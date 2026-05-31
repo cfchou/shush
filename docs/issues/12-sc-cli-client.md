@@ -2,6 +2,8 @@
 
 Status: ready-for-agent
 
+Priority: medium
+
 ## What to build
 
 Build the `shush client` subcommands so agents and scripts can interact with shush server from the command line, without a browser.

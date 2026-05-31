@@ -2,6 +2,8 @@
 
 Status: ready-for-agent
 
+Priority: medium
+
 ## What to build
 
 Add abort capability to kill a running command. When a user aborts, the server sends Ctrl+C via tmux send-keys, and falls back to `kill-pane` if the process doesn't stop within 2 seconds.

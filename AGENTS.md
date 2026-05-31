@@ -34,6 +34,9 @@ ADR is for deep research and decisions, read/write if you need to.
 
 # Issues
 
-Usually only need to the issue you are dealing with.
+Usually only need to read the issue you are dealing with.
+
+Smaller number in the filename represents higher priority.
+
 
 - docs/issues/*

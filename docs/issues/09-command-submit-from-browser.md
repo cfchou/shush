@@ -1,4 +1,4 @@
-# 06 — Command submit from browser
+# Command submit from browser
 
 Status: ready-for-agent
 
@@ -39,8 +39,8 @@ Priority: medium
 
 ## Blocked by
 
-- Issue 04: Command queue + REST (`docs/issues/04-command-queue-submit-approve-deny.md`) — provides the submit REST endpoint
-- Issue 05: Monitor card list (`docs/issues/05-monitor-card-list.md`) — users need to see the result of their submission
+- Issue 07: Command queue + REST (`docs/issues/07-command-queue-submit-approve-deny.md`) — provides the submit REST endpoint
+- Issue 08: Monitor card list (`docs/issues/08-monitor-card-list.md`) — users need to see the result of their submission
 
 ## References
 

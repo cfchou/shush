@@ -2,6 +2,8 @@
 
 Status: ready-for-agent
 
+Priority: medium
+
 ## What to build
 
 Add per-session YOLO mode that bypasses the approval gate. When YOLO is enabled, submitted commands skip PENDING and go straight to EXECUTING.

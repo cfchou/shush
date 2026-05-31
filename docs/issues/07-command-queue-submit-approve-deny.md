@@ -1,4 +1,4 @@
-# 04 — Command queue + submit/approve/deny REST
+# Command queue + submit/approve/deny REST
 
 Status: ready-for-agent
 

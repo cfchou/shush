@@ -2,6 +2,8 @@
 
 Status: ready-for-agent
 
+Priority: high - integration validation for remote host support
+
 ## What to build
 
 Add a focused validation slice for remote-host behavior using an Ubuntu Linux Docker container running `sshd` and `tmux`, so shush can prove the remote path before more remote features land.

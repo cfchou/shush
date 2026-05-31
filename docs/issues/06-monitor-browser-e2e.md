@@ -2,6 +2,8 @@
 
 Status: ready-for-agent
 
+Priority: high - browser-level integration coverage for monitor flow
+
 ## What to build
 
 Add browser-level end-to-end coverage for the monitor flow so shush verifies the real user-visible behavior of terminal monitoring in a live browser.

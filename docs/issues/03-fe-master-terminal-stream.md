@@ -1,4 +1,4 @@
-# 03 — FE master connection + terminal stream
+# FE master connection + terminal stream
 
 Status: ready-for-agent
 
