@@ -1,15 +1,15 @@
+use crate::remote_tmux;
 use base64::Engine;
 use std::{
     collections::HashMap,
     os::unix::io::{FromRawFd, RawFd},
-    process::Stdio,
     sync::{
         Arc, RwLock,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
 };
-use tokio::{io::AsyncReadExt, process::Command, sync::broadcast, task::JoinHandle};
+use tokio::{io::AsyncReadExt, sync::broadcast, task::JoinHandle};
 use uuid::Uuid;
 
 const FE_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -17,6 +17,7 @@ const FE_BROADCAST_CAPACITY: usize = 512;
 
 pub struct FeMasterHandle {
     session_name: String,
+    session_host: String,
     sender: broadcast::Sender<Vec<u8>>,
     child: tokio::sync::Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
     master_guard: tokio::sync::Mutex<Option<std::fs::File>>,
@@ -26,7 +27,7 @@ pub struct FeMasterHandle {
 }
 
 impl FeMasterHandle {
-    async fn spawn(session_name: &str) -> Result<Arc<Self>, String> {
+    async fn spawn(session_name: &str, session_host: &str) -> Result<Arc<Self>, String> {
         use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
         let pty_system = native_pty_system();
@@ -34,8 +35,28 @@ impl FeMasterHandle {
             .openpty(PtySize::default())
             .map_err(|e| format!("failed to open FE pty: {e}"))?;
 
-        let mut cmd = CommandBuilder::new("tmux");
-        cmd.args(["-L", "shush", "attach", "-r", "-t", session_name]);
+        let cmd = if remote_tmux::is_local_host(session_host) {
+            let mut cmd = CommandBuilder::new("tmux");
+            cmd.args([
+                "-L",
+                remote_tmux::TMUX_SOCKET,
+                "attach",
+                "-r",
+                "-t",
+                session_name,
+            ]);
+            cmd
+        } else {
+            let mut cmd = CommandBuilder::new("ssh");
+            if let Ok(config) = std::env::var("SHUSH_SSH_CONFIG") {
+                if !config.is_empty() {
+                    cmd.args(["-F", &config]);
+                }
+            }
+            cmd.args(["-tt", session_host, "tmux", "-L", remote_tmux::TMUX_SOCKET]);
+            cmd.args(["attach", "-r", "-t", session_name]);
+            cmd
+        };
 
         let child = pair
             .slave
@@ -86,6 +107,7 @@ impl FeMasterHandle {
 
         let handle = Arc::new(Self {
             session_name: session_name.to_string(),
+            session_host: session_host.to_string(),
             sender: sender.clone(),
             child: tokio::sync::Mutex::new(Some(child)),
             master_guard: tokio::sync::Mutex::new(Some(master_guard)),
@@ -122,20 +144,12 @@ impl FeMasterHandle {
     }
 
     pub async fn snapshot(&self) -> Result<String, String> {
-        let output = Command::new("tmux")
-            .args([
-                "-L",
-                "shush",
-                "capture-pane",
-                "-p",
-                "-t",
-                &self.session_name,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| format!("capture-pane failed: {e}"))?;
+        let output = remote_tmux::run_tmux_output(
+            &self.session_host,
+            &["capture-pane", "-p", "-t", &self.session_name],
+        )
+        .await
+        .map_err(|e| format!("capture-pane failed: {e}"))?;
 
         if !output.status.success() {
             return Err(format!("capture-pane exited with status {}", output.status));
@@ -184,6 +198,7 @@ impl FeMasterRegistry {
         self: &Arc<Self>,
         session_id: Uuid,
         session_name: String,
+        session_host: String,
     ) -> Result<Arc<FeMasterHandle>, String> {
         let existing = {
             let guard = self.masters.read().unwrap();
@@ -195,7 +210,7 @@ impl FeMasterRegistry {
             return Ok(existing);
         }
 
-        let handle = FeMasterHandle::spawn(&session_name).await?;
+        let handle = FeMasterHandle::spawn(&session_name, &session_host).await?;
         handle.on_connect().await;
 
         self.session_names

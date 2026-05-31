@@ -95,7 +95,7 @@ async fn ws_handler(
         return Err(StatusCode::NOT_FOUND);
     };
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(state, socket, id, session.name)))
+    Ok(ws.on_upgrade(move |socket| handle_socket(state, socket, id, session.name, session.host)))
 }
 
 async fn handle_socket(
@@ -103,9 +103,13 @@ async fn handle_socket(
     mut socket: WebSocket,
     session_id: Uuid,
     session_name: String,
+    session_host: String,
 ) {
     let registry = Arc::clone(&state.fe_masters);
-    let handle = match registry.get_or_spawn(session_id, session_name).await {
+    let handle = match registry
+        .get_or_spawn(session_id, session_name, session_host)
+        .await
+    {
         Ok(h) => h,
         Err(_) => {
             let _ = socket.close().await;

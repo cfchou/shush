@@ -1,7 +1,8 @@
+use crate::remote_tmux;
 use shush_core::session::{Session, SessionState};
 use std::collections::HashMap;
-use std::process::Command;
 use std::sync::RwLock;
+use tracing::error;
 use uuid::Uuid;
 
 pub struct SessionManager {
@@ -16,18 +17,17 @@ impl SessionManager {
     }
 
     pub fn create(&self, name: String, host: String) -> Session {
-        if host.is_empty() || host == "localhost" {
-            let exists = Command::new("tmux")
-                .args(["-L", "shush", "has-session", "-t", &name])
-                .status()
-                .map(|status| status.success())
-                .unwrap_or(false);
+        let exists = remote_tmux::run_tmux_status(&host, &["has-session", "-t", &name])
+            .map(|status| status.success())
+            .unwrap_or_else(|e| {
+                error!(error = ?e, "Failed to check tmux session existence");
+                // swallow
+                false
+            });
 
-            if !exists {
-                let _ = Command::new("tmux")
-                    .args(["-L", "shush", "new-session", "-d", "-s", &name])
-                    .status();
-            }
+        if !exists {
+            // '-d' detaches the session
+            let _ = remote_tmux::run_tmux_status(&host, &["new-session", "-d", "-s", &name]);
         }
 
         let session = Session {
@@ -50,11 +50,8 @@ impl SessionManager {
 
     pub fn delete(&self, id: Uuid) -> bool {
         if let Some(session) = self.sessions.read().unwrap().get(&id).cloned() {
-            if session.host.is_empty() || session.host == "localhost" {
-                let _ = Command::new("tmux")
-                    .args(["-L", "shush", "kill-session", "-t", &session.name])
-                    .status();
-            }
+            let _ =
+                remote_tmux::run_tmux_status(&session.host, &["kill-session", "-t", &session.name]);
         }
 
         self.sessions.write().unwrap().remove(&id).is_some()

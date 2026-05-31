@@ -39,13 +39,13 @@ This issue is about **testable remote session bring-up**, not full remote featur
 
 ## Acceptance criteria
 
-- [ ] A local Ubuntu Docker container can be started as an SSH target for shush development
-- [ ] Shush can create a session with `host` pointing at that SSH target
-- [ ] The remote tmux session is created successfully and can be confirmed on the container
-- [ ] `capture-pane` works against the remote session and returns terminal content
-- [ ] Remote session deletion removes the tmux session on the container
-- [ ] A repeatable validation command or test script exists for this remote path
-- [ ] Any PTY / tmux / SSH behavioral differences discovered are documented
+- [x] A local Ubuntu Docker container can be started as an SSH target for shush development
+- [x] Shush can create a session with `host` pointing at that SSH target
+- [x] The remote tmux session is created successfully and can be confirmed on the container
+- [x] `capture-pane` works against the remote session and returns terminal content
+- [x] Remote session deletion removes the tmux session on the container
+- [x] A repeatable validation command or test script exists for this remote path
+- [x] Any PTY / tmux / SSH behavioral differences discovered are documented
 
 ## Blocked by
 
