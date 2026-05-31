@@ -52,7 +52,7 @@ Priority: medium
 ## Blocked by
 
 - Issue 03: FE master + terminal stream (`docs/issues/03-fe-master-terminal-stream.md`) — provides WS channel and monitor view layout
-- Issue 07: Command queue + REST (`docs/issues/07-command-queue-submit-approve-deny.md`) — provides REST endpoints and WS card push
+- Issue 08: Command queue + REST (`docs/issues/08-command-queue-submit-approve-deny.md`) — provides REST endpoints and WS card push
 
 ## References
 

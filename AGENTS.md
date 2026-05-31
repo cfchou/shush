@@ -5,19 +5,24 @@
 
 - DO NOT commit unless user explicitly say so
 
+
 # Guideline
 
 - Only implement one issue at a time.
 
-- During implementation, if spotting technical gaps, inconsistency or ambiguity in Plans:
-   * If it's a big gap, stop and then present the problem to the user.
-   * Otherwise, launch subagents to research, write an ADR, then continue.
-
-- During implementation:
+- Before implementation, 
+    * Plan for TDD (use /tdd skill if available)
+    
+- During implementation, 
+    * if spotting technical gaps, inconsistency or ambiguity in Plans:
+        - If it's a big gap, stop and then present the problem to the user.
+        - Otherwise, launch subagents to research, write an ADR, then continue.
    * Tick the '[ ]' box of Acceptance Criteria in the issue when one is done.
+   * Always write unit tests.
 
 - After implementation:
    * Request to update *Plans* after implementation to close any gap.
+
 
 # Plans
 
