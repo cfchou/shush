@@ -13,11 +13,11 @@ shush maintains **two separate tmux client processes** per managed session:
 | Connection | Command | Purpose |
 |---|---|---|
 | **SC connection** | `tmux -L shush -CC attach -t <session>` | Structured event stream (`%output`, `%begin`, `%end`, `%session-changed`); marker detection; `send-keys` for command injection |
-| **FE connection** | `tmux -L shush attach -t <session> -r` | Raw ANSI byte stream read from stdout, base64-encoded into `{"type":"terminal"}` WebSocket frames for xterm.js |
+| **FE connection** | `tmux -L shush attach -t <session> -r` | Raw ANSI byte stream read from a PTY-backed attach client, base64-encoded into `{"type":"terminal"}` WebSocket frames for xterm.js |
 
-The FE connection uses plain `attach -r` (read-only, **no `-CC`**). It does not enter the control-mode path and does not need a PTY — tmux's server side handles a pipeless `attach -r` client headlessly and still emits raw ANSI output to stdout. This is the standard scripted attach pattern used in CI and automation.
+The FE connection uses plain `attach -r` (read-only, **no `-CC`**). Early investigation assumed this path would work headlessly with piped stdio and no PTY. Runtime verification on tmux `3.6b` on macOS contradicted that assumption: `attach -r` also exits immediately with `open terminal failed: not a terminal` when spawned without a tty. The FE connection therefore also needs a PTY, even though it does not use control mode.
 
-This ADR concerns only the **SC connection** (`-CC`), where the PTY requirement was discovered.
+This ADR originally concerned only the **SC connection** (`-CC`), but later FE runtime research showed the same practical PTY requirement for the read-only attach path used by browser viewers.
 
 The original SC connection was spawned using `tokio::process::Command` with `Stdio::piped()`:
 

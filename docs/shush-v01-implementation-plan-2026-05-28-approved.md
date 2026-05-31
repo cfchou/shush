@@ -40,8 +40,8 @@
 ```
 
 Two tmux client processes per session managed by SS:
-- **SC connection**: `tmux -L shush -CC attach -t <session>` (Control Mode, stdin/stdout pipe, no PTY)
-- **FE connection**: `tmux -L shush attach -t <session> -r` (read-only, stdout = raw ANSI stream, spawned on-demand for browser viewers)
+- **SC connection**: `tmux -L shush -CC attach -t <session>` (Control Mode, PTY-backed client process)
+- **FE connection**: `tmux -L shush attach -t <session> -r` (read-only, PTY-backed client process, raw ANSI stream, spawned on-demand for browser viewers)
 
 The `host` field on Session determines the backend: `""`/`"localhost"` = direct tmux, `"user@host"` = SSH.
 
@@ -170,9 +170,12 @@ shush-core:
   uuid = { version = "1", features = ["v4", "serde"] }
   chrono = { version = "0.4", features = ["serde"] }
   thiserror (error types)
+  tracing, tracing-subscriber
 
 shush-bin:
   shush-core
+  thiserror (error types)
+  anyhow
   tokio = { version = "1", features = ["full"] }
   axum = { version = "0.8", features = ["ws"] }
   clap = { version = "4", features = ["derive"] }
@@ -181,6 +184,9 @@ shush-bin:
   reqwest = { version = "0.12", features = ["json", "ws"] }
   base64 (for terminal data encoding in WebSocket)
 ```
+
+May include more if see fit.
+
 
 
 ## Implementation Phases
@@ -276,9 +282,9 @@ cargo test -p shush-bin -- --test-threads=1
 
 `api/mod.rs`:
 - Axum router setup: `Router::new().nest("/api", api_routes())`
-- Shared state: `Arc<SessionManager>`
+- Shared state: app state containing `SessionManager` plus FE master registry
 - Tower CORS layer (allow localhost origins)
-- Static file serving for frontend
+- Static file serving for frontend with SPA fallback to `index.html` for deep links like `/monitor/:sessionId`
 
 `api/sessions.rs`:
 - `create_session`, `list_sessions`, `get_session`, `delete_session` handlers
@@ -294,7 +300,7 @@ cargo test -p shush-bin -- --test-threads=1
 `api/ws.rs`:
 - `ws_handler` — Axum WebSocket upgrade
 - On connect:
-  1. Spawn FE master connection: `tmux -L shush attach -t <session> -r`
+  1. Spawn FE master connection: `tmux -L shush attach -t <session> -r` under a PTY
   2. Send `capture-pane` snapshot as `{"type":"snapshot",...}`
   3. Fork reader task: reads FE stdout in chunks, broadcasts to WebSocket as `{"type":"terminal","data":"..."}`
   4. Subscribe to command card state changes, push `{"type":"card","card":...}`
@@ -402,6 +408,7 @@ cargo run -- client submit <session-id> "echo hello"
 | Marker nonce | 32-byte CSPRNG, hex-encoded | Prevents prompt spoofing, no sequential guessability |
 | Terminal encoding | Base64 in WebSocket JSON | Simplifies JSON parsing, avoids binary frame complexity |
 | FE connection lifecycle | Dynamic (spawn on first viewer, teardown after 5s idle) | Conserves resources when no one is watching |
+| FE attach transport | PTY-backed `tmux attach -r` | Runtime validation on tmux 3.6b/macOS showed plain piped stdio exits with `open terminal failed: not a terminal` |
 | Late-join strategy | capture-pane snapshot + live stream | Works with tmux native features, no byte buffer needed for v0.1 |
 | Abort strategy | SIGINT → kill-pane (2s timeout) | Standard tmux abort path, covers stuck processes |
 | Port | 8100 | Unlikely to conflict, easy to remember |
@@ -495,4 +502,3 @@ cargo build --release
 - Authentication / user management
 - Mobile-responsive frontend
 - Tests for frontend (manual verification for v0.1)
-

@@ -14,6 +14,7 @@ dist/
 # AI
 .opencode
 .agents
+.serena
 skills-lock.json
 
 # Temp

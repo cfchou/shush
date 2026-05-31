@@ -62,7 +62,9 @@ function renderCard(session: Session): string {
   return `
     <div class="session-card" data-id="${session.id}">
       <div class="session-card-body">
-        <div class="session-name">${escapeHtml(session.name)}</div>
+        <div class="session-name">
+          <a class="monitor-link" href="/monitor/${encodeURIComponent(session.id)}">${escapeHtml(session.name)}</a>
+        </div>
         <div class="session-meta">
           <span class="session-state">${session.state}</span>
           <span class="session-host">${escapeHtml(session.host || "local")}</span>

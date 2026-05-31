@@ -1,5 +1,6 @@
 use shush_core::session::{Session, SessionState};
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::RwLock;
 use uuid::Uuid;
 
@@ -15,6 +16,20 @@ impl SessionManager {
     }
 
     pub fn create(&self, name: String, host: String) -> Session {
+        if host.is_empty() || host == "localhost" {
+            let exists = Command::new("tmux")
+                .args(["-L", "shush", "has-session", "-t", &name])
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
+
+            if !exists {
+                let _ = Command::new("tmux")
+                    .args(["-L", "shush", "new-session", "-d", "-s", &name])
+                    .status();
+            }
+        }
+
         let session = Session {
             id: Uuid::new_v4(),
             name,
@@ -34,6 +49,14 @@ impl SessionManager {
     }
 
     pub fn delete(&self, id: Uuid) -> bool {
+        if let Some(session) = self.sessions.read().unwrap().get(&id).cloned() {
+            if session.host.is_empty() || session.host == "localhost" {
+                let _ = Command::new("tmux")
+                    .args(["-L", "shush", "kill-session", "-t", &session.name])
+                    .status();
+            }
+        }
+
         self.sessions.write().unwrap().remove(&id).is_some()
     }
 

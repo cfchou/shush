@@ -45,14 +45,14 @@ Create the `shush-bin` binary crate and implement the server scaffold with sessi
 
 ## Acceptance criteria
 
-- [ ] `cargo build` compiles both crates without errors
-- [ ] `cargo run -- server &` starts and listens on `127.0.0.1:8100`
-- [ ] `curl -X POST http://127.0.0.1:8100/api/sessions -H 'Content-Type: application/json' -d '{"name":"test","host":""}'` returns a session with an id
-- [ ] `curl http://127.0.0.1:8100/api/sessions` returns the created session
-- [ ] `cd frontend && npm install && npm run build` succeeds
-- [ ] Browser at `http://127.0.0.1:8100` shows dashboard with session list and create form
-- [ ] Creating a session via the browser form shows it in the list
-- [ ] Deleting a session via the browser removes it from the list
+- [x] `cargo build` compiles both crates without errors
+- [x] `cargo run -- server &` starts and listens on `127.0.0.1:8100`
+- [x] `curl -X POST http://127.0.0.1:8100/api/sessions -H 'Content-Type: application/json' -d '{"name":"test","host":""}'` returns a session with an id
+- [x] `curl http://127.0.0.1:8100/api/sessions` returns the created session
+- [x] `cd frontend && npm install && npm run build` succeeds
+- [x] Browser at `http://127.0.0.1:8100` shows dashboard with session list and create form
+- [x] Creating a session via the browser form shows it in the list
+- [x] Deleting a session via the browser removes it from the list
 
 ## Blocked by
 

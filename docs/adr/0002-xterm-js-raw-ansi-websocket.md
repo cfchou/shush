@@ -81,9 +81,16 @@ Key properties:
 - **`onWriteParsed` fires at most once per frame**, after parsing completes for that batch. It may fire while more writes are still pending if input is heavy.
 - **A specific chunk is not guaranteed to appear in a specific frame.** The buffer model may advance further before the next repaint.
 
-### The FE connection does not need a PTY
+### FE attach needs a PTY in this environment
 
-`tmux attach -r` (without `-CC`) is a plain read-only attach. The tmux server's `tty_init` calls `isatty()` on the passed fd — if it is a pipe, `tty_init` returns `-1`, the server marks the client as having no terminal, and still emits raw ANSI bytes to stdout. This is the standard scripted-attach pattern. No PTY required for the FE connection. (Contrast with the SC connection: see ADR-0001.)
+The original design assumed `tmux attach -r` (without `-CC`) would work headlessly with piped stdio. On the current runtime target (tmux `3.6b` on macOS), that assumption is false:
+
+```bash
+tmux -L shush attach -r -t mysession < /dev/null
+# → open terminal failed: not a terminal
+```
+
+Running the same command under a PTY wrapper succeeds, and tmux registers a real read-only client visible via `list-clients`. So the FE path still remains a transparent ANSI pipe to xterm.js, but the spawning mechanism must use a PTY-backed tmux client rather than plain `Stdio::piped()`.
 
 ---
 
@@ -91,8 +98,8 @@ Key properties:
 
 ### SS side
 
-- Spawn `tmux -L shush attach -t <session> -r` with `Stdio::piped()` stdout.
-- Read stdout in chunks (no special framing needed — xterm.js handles split escape sequences across chunks).
+- Spawn `tmux -L shush attach -t <session> -r` under a PTY and read from the PTY master.
+- Read stdout-equivalent bytes in chunks (no special framing needed — xterm.js handles split escape sequences across chunks).
 - Base64-encode each chunk and send as `{"type":"terminal","data":"<b64>"}`.
 - On new WebSocket connection, send a `{"type":"snapshot","data":"<b64>"}` first using `tmux capture-pane -p` output, so late-joiners see current state.
 
@@ -138,7 +145,7 @@ For v0.1 — a single human watching a terminal — the throughput is nowhere ne
 - No translation layer needed between tmux ANSI output and xterm.js input. SS is a transparent pipe.
 - Chunked streaming works naturally — xterm.js handles escape sequences split across chunk boundaries.
 - Late-join via `capture-pane` snapshot is sufficient for v0.1 (no byte-level scrollback buffer needed in SS).
-- No PTY needed for the FE connection (`attach -r` with plain pipe works on all platforms).
+- The FE connection still delivers raw ANSI bytes unchanged, but on this environment it must be PTY-backed rather than spawned with plain piped stdio.
 
 **Negative / watch points**
 - `capture-pane` only captures the visible viewport, not the scrollback buffer. A browser user who connects after output has scrolled off will not see that history. Accepted limitation for v0.1.

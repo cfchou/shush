@@ -1,4 +1,5 @@
 mod cli;
+mod fe_master;
 mod server;
 mod session_manager;
 mod tmux_control;
