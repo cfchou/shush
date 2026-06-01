@@ -105,6 +105,8 @@ shush/
 
 Base URL: `http://127.0.0.1:8100/api`
 
+Implementation note (2026-06-01): `shush server` now supports `--port <u16>`. Default remains `8100`; E2E uses a per-run ephemeral port and threads a shared runtime base URL.
+
 | Method | Path | Request Body | Response | Description |
 |--------|------|-------------|----------|-------------|
 | POST | `/sessions` | `{ "name": "dev", "host": "" }` | `Session` | Create session (host empty = local) |
@@ -413,7 +415,7 @@ cargo run -- client submit <session-id> "echo hello"
 | FE attach transport | PTY-backed `tmux attach -r` | Runtime validation on tmux 3.6b/macOS showed plain piped stdio exits with `open terminal failed: not a terminal` |
 | Late-join strategy | capture-pane snapshot + live stream | Works with tmux native features, no byte buffer needed for v0.1 |
 | Abort strategy | SIGINT → kill-pane (2s timeout) | Standard tmux abort path, covers stuck processes |
-| Port | 8100 | Unlikely to conflict, easy to remember |
+| Port | Default 8100, override via `shush server --port <PORT>` | Keeps local dev UX simple while allowing ephemeral-port E2E isolation |
 
 ## Unknowns
 

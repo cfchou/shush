@@ -35,11 +35,11 @@ For E2E, a per-run ephemeral port is a better fit.
 
 ## Acceptance criteria
 
-- [ ] E2E runtime no longer hard-codes port `8100`
-- [ ] Backend binds to a per-run chosen port during E2E
-- [ ] Helper requests and browser navigation use a shared runtime base URL
-- [ ] Restart coverage passes without `AddrInUse` noise caused by fixed-port reuse
-- [ ] `SHUSH_E2E_REMOTE=1 npm run test:e2e` remains green
+- [x] E2E runtime no longer hard-codes port `8100`
+- [x] Backend binds to a per-run chosen port during E2E
+- [x] Helper requests and browser navigation use a shared runtime base URL
+- [x] Restart coverage passes without `AddrInUse` noise caused by fixed-port reuse
+- [x] `SHUSH_E2E_REMOTE=1 npm run test:e2e` remains green
 
 ## References
 

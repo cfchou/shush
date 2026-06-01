@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -16,6 +17,15 @@ const frontendDir = path.resolve(currentDir, "..");
 
 class ServerRuntime {
   private proc: ReturnType<typeof spawn> | null = null;
+  private readonly port: number;
+
+  constructor(port: number) {
+    this.port = port;
+  }
+
+  baseUrl(): string {
+    return `http://127.0.0.1:${this.port}`;
+  }
 
   async buildFrontend(): Promise<void> {
     await runCommand("npm", ["run", "build"], frontendDir);
@@ -23,7 +33,7 @@ class ServerRuntime {
 
   async start(): Promise<void> {
     if (this.proc) return;
-    this.proc = spawn("cargo", ["run", "--", "server"], {
+    this.proc = spawn("cargo", ["run", "--", "server", "--port", String(this.port)], {
       cwd: repoRoot,
       env: {
         ...process.env,
@@ -32,7 +42,7 @@ class ServerRuntime {
       },
       stdio: "inherit",
     });
-    await waitForServerReady();
+    await waitForServerReady(this.baseUrl());
   }
 
   async stop(): Promise<void> {
@@ -55,9 +65,11 @@ class ServerRuntime {
   }
 }
 
-const runtime = new ServerRuntime();
+let runtime: ServerRuntime;
 
 test.beforeAll(async () => {
+  const port = await allocateFreePort();
+  runtime = new ServerRuntime(port);
   await runtime.buildFrontend();
   await runtime.start();
 });
@@ -70,13 +82,13 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));
   const backend: Backend = { kind: "local", host: "", label: "local" };
-  const session = await createSession(backend);
+  const session = await createSession(runtime.baseUrl(), backend);
   try {
     const seed = `snapshot-seed-${randomUUID().slice(0, 8)}`;
     await sendVisibleLine(backend, session.name, seed);
 
     await installWsProbe(page);
-    await page.goto(`/monitor/${encodeURIComponent(session.id)}`);
+    await page.goto(`${runtime.baseUrl()}/monitor/${encodeURIComponent(session.id)}`);
     await expect(page.locator(".monitor-page")).toBeVisible();
     await expect(page.locator(".session-id")).toContainText(session.id);
     if (isStreamAssertEnabled()) {
@@ -92,7 +104,7 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
 
     const second = await browser.newPage();
     await installWsProbe(second);
-    await second.goto(`/monitor/${encodeURIComponent(session.id)}`);
+    await second.goto(`${runtime.baseUrl()}/monitor/${encodeURIComponent(session.id)}`);
     const shared = `two-tabs-${randomUUID().slice(0, 8)}`;
     await sendVisibleLine(backend, session.name, shared);
     if (isStreamAssertEnabled()) {
@@ -103,7 +115,7 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
 
     const reopened = await browser.newPage();
     await installWsProbe(reopened);
-    await reopened.goto(`/monitor/${encodeURIComponent(session.id)}`);
+    await reopened.goto(`${runtime.baseUrl()}/monitor/${encodeURIComponent(session.id)}`);
     if (isStreamAssertEnabled()) {
       await expect.poll(() => streamContains(reopened, shared)).toBe(true);
     }
@@ -130,7 +142,7 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
 
     expect(pageErrors).toEqual([]);
   } finally {
-    await deleteSession(session.id);
+    await deleteSession(runtime.baseUrl(), session.id);
   }
 });
 
@@ -149,13 +161,13 @@ test.describe("remote monitor coverage", () => {
       sshConfig,
       label: "remote",
     };
-    const session = await createSession(backend);
+    const session = await createSession(runtime.baseUrl(), backend);
     try {
       const seed = `remote-seed-${randomUUID().slice(0, 8)}`;
       await sendVisibleLine(backend, session.name, seed);
 
       await installWsProbe(page);
-      await page.goto(`/monitor/${encodeURIComponent(session.id)}`);
+      await page.goto(`${runtime.baseUrl()}/monitor/${encodeURIComponent(session.id)}`);
       await expect(page.locator(".monitor-page")).toBeVisible();
       if (isStreamAssertEnabled()) {
         await expect.poll(() => streamContains(page, seed)).toBe(true);
@@ -174,7 +186,7 @@ test.describe("remote monitor coverage", () => {
         }).toBe(true);
       }
     } finally {
-      await deleteSession(session.id);
+      await deleteSession(runtime.baseUrl(), session.id);
     }
   });
 
@@ -187,11 +199,11 @@ test.describe("remote monitor coverage", () => {
       sshConfig,
       label: "remote-lf-alignment",
     };
-    const session = await createSession(backend);
+    const session = await createSession(runtime.baseUrl(), backend);
 
     try {
       await installWsProbe(page);
-      await page.goto(`/monitor/${encodeURIComponent(session.id)}`);
+      await page.goto(`${runtime.baseUrl()}/monitor/${encodeURIComponent(session.id)}`);
       await expect(page.locator(".monitor-page")).toBeVisible();
 
       await sendShellCommand(backend, session.name, "printf 'AA\\nBB\\nCC\\n'");
@@ -220,16 +232,16 @@ test.describe("remote monitor coverage", () => {
         })
         .toContain("\nCC");
     } finally {
-      await deleteSession(session.id);
+      await deleteSession(runtime.baseUrl(), session.id);
     }
   });
 });
 
-async function waitForServerReady(timeoutMs = 30_000): Promise<void> {
+async function waitForServerReady(baseUrl: string, timeoutMs = 30_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const response = await fetch("http://127.0.0.1:8100/api/sessions");
+      const response = await fetch(`${baseUrl}/api/sessions`);
       if (response.ok) return;
     } catch {
       // retry
@@ -239,9 +251,9 @@ async function waitForServerReady(timeoutMs = 30_000): Promise<void> {
   throw new Error("server did not become ready in time");
 }
 
-async function createSession(backend: Backend): Promise<Session> {
+async function createSession(baseUrl: string, backend: Backend): Promise<Session> {
   const suffix = randomUUID().slice(0, 8);
-  const response = await fetch("http://127.0.0.1:8100/api/sessions", {
+  const response = await fetch(`${baseUrl}/api/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -257,8 +269,30 @@ async function createSession(backend: Backend): Promise<Session> {
   return session;
 }
 
-async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`http://127.0.0.1:8100/api/sessions/${sessionId}`, { method: "DELETE" });
+async function deleteSession(baseUrl: string, sessionId: string): Promise<void> {
+  await fetch(`${baseUrl}/api/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+async function allocateFreePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close(() => reject(new Error("failed to allocate local port")));
+        return;
+      }
+      const { port } = address;
+      server.close((err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(port);
+        }
+      });
+    });
+    server.on("error", reject);
+  });
 }
 
 async function sendVisibleLine(backend: Backend, sessionName: string, line: string): Promise<void> {

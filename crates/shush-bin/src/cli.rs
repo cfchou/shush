@@ -14,7 +14,10 @@ pub enum Command {
 }
 
 #[derive(Debug, clap::Args)]
-pub struct ServerCmd {}
+pub struct ServerCmd {
+    #[arg(long, default_value_t = 8100)]
+    pub port: u16,
+}
 
 #[derive(Debug, clap::Args)]
 pub struct ClientCmd {
@@ -37,7 +40,19 @@ mod tests {
     #[test]
     fn parse_server_subcommand() {
         let cli = Cli::try_parse_from(["shush", "server"]).unwrap();
-        assert!(matches!(cli.command, Command::Server(_)));
+        let Command::Server(cmd) = cli.command else {
+            unreachable!()
+        };
+        assert_eq!(cmd.port, 8100);
+    }
+
+    #[test]
+    fn parse_server_subcommand_with_port_override() {
+        let cli = Cli::try_parse_from(["shush", "server", "--port", "18080"]).unwrap();
+        let Command::Server(cmd) = cli.command else {
+            unreachable!()
+        };
+        assert_eq!(cmd.port, 18080);
     }
 
     #[test]
