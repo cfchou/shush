@@ -131,6 +131,8 @@ Base URL: `http://127.0.0.1:8100/api`
 ```
 `terminal` = live stream bytes. `snapshot` = full capture-pane on join.
 
+Implementation note (2026-06-01): for remote late-join stability, SS may send a bounded replay of recent FE terminal bytes immediately after `snapshot` for additional viewers. Replay uses the same `terminal` message shape.
+
 **Client → Server**: All messages ignored (read-only terminal enforcement at SS level).
 
 ### CommandCard Schema

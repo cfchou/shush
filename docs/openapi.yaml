@@ -1,0 +1,283 @@
+openapi: 3.1.0
+info:
+  title: shush Server API
+  version: 0.1.0
+  summary: REST API for shush sessions and command queue
+  description: |
+    OpenAPI spec for manual testing of the shush backend.
+
+    Base URL: `http://127.0.0.1:8100`
+
+    Notes:
+    - All REST paths are under `/api`.
+    - WebSocket streaming uses `/api/sessions/{id}/stream` and sends JSON messages
+      with `type` values like `snapshot`, `terminal`, and `card`.
+servers:
+  - url: http://127.0.0.1:8100
+    description: Local development server
+paths:
+  /api/sessions:
+    get:
+      operationId: listSessions
+      summary: List sessions
+      responses:
+        '200':
+          description: All sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+    post:
+      operationId: createSession
+      summary: Create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+            examples:
+              local:
+                value:
+                  name: dev
+                  host: ""
+              remote:
+                value:
+                  name: dev
+                  host: shush-docker
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  /api/sessions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      operationId: getSession
+      summary: Get session by id
+      responses:
+        '200':
+          description: Session found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404':
+          description: Session not found
+    delete:
+      operationId: deleteSession
+      summary: Delete session
+      responses:
+        '204':
+          description: Session deleted
+        '404':
+          description: Session not found
+    post:
+      operationId: sessionAction
+      summary: Perform session action
+      description: |
+        Supported actions:
+        - `submit` (requires JSON body)
+        - `approve`
+        - `deny`
+      parameters:
+        - name: action
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [submit, approve, deny]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitCommandRequest'
+            examples:
+              submit:
+                value:
+                  command: echo hello
+      responses:
+        '200':
+          description: Updated session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          description: Invalid action or invalid state transition
+          content:
+            text/plain:
+              schema:
+                type: string
+        '404':
+          description: Session not found
+
+  /api/sessions/{id}/commands:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      operationId: listCommands
+      summary: List past command cards
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+      responses:
+        '200':
+          description: Command cards, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CommandCard'
+        '404':
+          description: Session not found
+
+  /api/sessions/{id}/stream:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      operationId: streamSession
+      summary: Upgrade to WebSocket stream
+      description: |
+        WebSocket endpoint used by monitor page.
+
+        Server->client JSON messages include:
+        - `{"type":"snapshot","data":"<base64>"}`
+        - `{"type":"terminal","data":"<base64>"}`
+        - `{"type":"card","card":{...}}`
+
+        Any client->server messages are ignored.
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket upgrade)
+        '404':
+          description: Session not found
+components:
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    CreateSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [name, host]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        host:
+          type: string
+          description: Empty string or localhost for local; SSH target (for example shush-docker) for remote.
+
+    SubmitCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [command]
+      properties:
+        command:
+          type: string
+          minLength: 1
+
+    SessionState:
+      type: string
+      enum: [idle, pending, executing]
+
+    CommandState:
+      description: |
+        `completed` is represented as an object carrying exit code, e.g. `{ "completed": 0 }`.
+      oneOf:
+        - type: string
+          enum: [pending, executing, rejected, aborted]
+        - type: object
+          additionalProperties: false
+          required: [completed]
+          properties:
+            completed:
+              type: integer
+
+    CommandCard:
+      type: object
+      required:
+        - id
+        - command
+        - state
+        - exit_code
+        - output
+        - created_at
+        - resolved_at
+        - resolved_by
+      properties:
+        id:
+          type: string
+          format: uuid
+        command:
+          type: string
+        state:
+          $ref: '#/components/schemas/CommandState'
+        exit_code:
+          type:
+            - integer
+            - 'null'
+        output:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        resolved_by:
+          type:
+            - string
+            - 'null'
+
+    Session:
+      type: object
+      required:
+        - id
+        - name
+        - host
+        - state
+        - yolo
+        - current_command
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        host:
+          type: string
+        state:
+          $ref: '#/components/schemas/SessionState'
+        yolo:
+          type: boolean
+        current_command:
+          oneOf:
+            - $ref: '#/components/schemas/CommandCard'
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time

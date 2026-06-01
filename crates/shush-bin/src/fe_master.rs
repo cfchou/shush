@@ -1,11 +1,12 @@
 use crate::remote_tmux;
 use base64::Engine;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::{
     collections::HashMap,
     os::unix::io::{FromRawFd, RawFd},
     sync::{
         Arc, RwLock,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -15,22 +16,46 @@ use uuid::Uuid;
 
 const FE_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 const FE_BROADCAST_CAPACITY: usize = 512;
+const FE_REPLAY_BUFFER_MAX_BYTES: usize = 128 * 1024;
+
+#[derive(Clone, Debug)]
+pub enum FeEvent {
+    Chunk(Vec<u8>),
+    Closed,
+}
 
 pub struct FeMasterHandle {
+    // One FeMasterHandle corresponds to one child process that attaches tmux
+    // session (remote/local).
     session_name: String,
     session_host: String,
-    sender: broadcast::Sender<Vec<u8>>,
+
+    // For broadcasting FE events (terminal output chunks, closure) to viewers.
+    sender: broadcast::Sender<FeEvent>,
+
+    // Child process that runs `tmux attach` (via ssh if remote). It is
+    // spawned on the SLAVE side of the PTY.
     child: tokio::sync::Mutex<Option<Box<dyn portable_pty::Child + Send + Sync>>>,
+
+    // A "guard" fd to keep the PTY alive until shutdown. `reader_task` has another fd for reading,
     master_guard: tokio::sync::Mutex<Option<std::fs::File>>,
+
     reader_task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
+
+    // Ring buffer that accumulates raw PTY bytes as they arrive.
+    replay_buffer: tokio::sync::Mutex<Vec<u8>>,
+
     viewers: AtomicUsize,
     idle_task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
+
+    // Whether the FE master process is alive. It becomes false when
+    // `reader_task` encounters EOF or error.
+    alive: AtomicBool,
 }
 
 impl FeMasterHandle {
     async fn spawn(session_name: &str, session_host: &str) -> Result<Arc<Self>, String> {
-        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
-
+        // Spawn a tmux client(viewer) to attach to a session.
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize::default())
@@ -42,7 +67,8 @@ impl FeMasterHandle {
                 "-L",
                 remote_tmux::TMUX_SOCKET,
                 "attach",
-                "-r",
+                "-f",
+                "read-only,ignore-size",
                 "-t",
                 session_name,
             ]);
@@ -55,12 +81,32 @@ impl FeMasterHandle {
                     cmd.args(["-F", &config]);
                 }
             }
+            // SSH options:
+            // * `-o BatchMode=yes`: disables all interactive prompts for passwords or passphrases
+            //   during an SSH connection; fail immediately if it can't authenticate
+            //   non-interactively.
+            // * `-tt`: when running `ssh host command`, SSH does not allocate a PTY on the "remote"
+            //   side — it just connects stdin/stdout directly. With `-tt`, SSH allocates a PTY on
+            //   the "remote" side and runs the command in it. Note that the `portable_pty` gives
+            //   SSH a TTY on the "local" side. The two PTYs are connected through the SSH channel.
             cmd.args(["-o", "BatchMode=yes"]);
+            //
+            // tmux options:
+            // * `-f ignore-size`: tmux client doesn't report its terminal size to the session, so
+            //   attaching this client won't cause the session to resize
             cmd.args(["-tt", session_host, "tmux", "-L", remote_tmux::TMUX_SOCKET]);
-            cmd.args(["attach", "-r", "-t", session_name]);
+            cmd.args(["attach", "-f", "read-only,ignore-size", "-t", session_name]);
             cmd
         };
 
+        // PTY pair:
+        // * Master: The fd that we read from and writes to. What we write to the master appears
+        //   as input to the slave; what the slave program writes appears as output on the master.
+        // * Slave: The device(e.g. /dev/pts/N) that the child process uses as its controlling
+        //   terminal.
+
+        // Spawn the child process (tmux/ssh) on the SLAVE side. The child's stdin/stdout/stderr
+        // are connected to the slave PTY device.
         let child = pair
             .slave
             .spawn_command(cmd)
@@ -73,6 +119,15 @@ impl FeMasterHandle {
             .as_raw_fd()
             .ok_or("FE PTY master has no raw fd")?;
 
+        // Another two copies of `master_fd`:
+        // * reader_fd set to non-blocking for async reading (via tokio). It will be owned by the
+        //   reader task.
+        // * guard_fd kept as a "guard" to keep the PTY alive (since dropping all master file
+        //   descriptors would destroy the PTY and kill the child).
+        //
+        // reader_fd is owned by BufReader in the reader task. It may return early due to EOF or
+        // error, then close reader_fd. The master_guard in the handle keeps the PTY alive until
+        // shutdown. Without it, PTY may or may not exist when shutdown.
         let reader_fd = unsafe { libc::dup(master_fd) };
         if reader_fd < 0 {
             return Err(format!(
@@ -108,7 +163,7 @@ impl FeMasterHandle {
 
         drop(pair.master);
 
-        let (sender, _) = broadcast::channel::<Vec<u8>>(FE_BROADCAST_CAPACITY);
+        let (sender, _) = broadcast::channel::<FeEvent>(FE_BROADCAST_CAPACITY);
 
         let handle = Arc::new(Self {
             session_name: session_name.to_string(),
@@ -117,11 +172,14 @@ impl FeMasterHandle {
             child: tokio::sync::Mutex::new(Some(child)),
             master_guard: tokio::sync::Mutex::new(Some(master_guard)),
             reader_task: tokio::sync::Mutex::new(None),
+            replay_buffer: tokio::sync::Mutex::new(Vec::new()),
             viewers: AtomicUsize::new(0),
             idle_task: tokio::sync::Mutex::new(None),
+            alive: AtomicBool::new(true),
         });
 
         let reader_sender = sender.clone();
+        let reader_handle = Arc::clone(&handle);
         let reader_session_name = session_name.to_string();
         let reader_session_host = session_host.to_string();
         let reader = tokio::spawn(async move {
@@ -131,10 +189,23 @@ impl FeMasterHandle {
                 match reader.read(&mut buf).await {
                     Ok(0) => {
                         warn!(session_host = %reader_session_host, session_name = %reader_session_name, "FE reader reached EOF");
+                        reader_handle.alive.store(false, Ordering::SeqCst);
+                        let _ = reader_sender.send(FeEvent::Closed);
                         break;
                     }
                     Ok(n) => {
-                        let _ = reader_sender.send(buf[..n].to_vec());
+                        // Write PTY bytes to two places:
+                        // 1. accumulates in replay_buffer.
+                        let mut replay = reader_handle.replay_buffer.lock().await;
+                        replay.extend_from_slice(&buf[..n]);
+                        if replay.len() > FE_REPLAY_BUFFER_MAX_BYTES {
+                            let excess = replay.len() - FE_REPLAY_BUFFER_MAX_BYTES;
+                            replay.drain(..excess);
+                        }
+                        drop(replay);
+
+                        // 2. broadcast to all viewers.
+                        let _ = reader_sender.send(FeEvent::Chunk(buf[..n].to_vec()));
                     }
                     Err(err)
                         if matches!(
@@ -146,6 +217,8 @@ impl FeMasterHandle {
                     }
                     Err(err) => {
                         warn!(session_host = %reader_session_host, session_name = %reader_session_name, error = %err, "FE reader failed");
+                        reader_handle.alive.store(false, Ordering::SeqCst);
+                        let _ = reader_sender.send(FeEvent::Closed);
                         break;
                     }
                 }
@@ -171,8 +244,20 @@ impl FeMasterHandle {
         Ok(base64::engine::general_purpose::STANDARD.encode(output.stdout))
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<Vec<u8>> {
+    pub fn subscribe(&self) -> broadcast::Receiver<FeEvent> {
         self.sender.subscribe()
+    }
+
+    pub async fn replay_bytes(&self) -> Vec<u8> {
+        self.replay_buffer.lock().await.clone()
+    }
+
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::SeqCst)
+    }
+
+    pub fn viewer_count(&self) -> usize {
+        self.viewers.load(Ordering::SeqCst)
     }
 
     async fn shutdown(&self) {
@@ -208,6 +293,11 @@ impl FeMasterRegistry {
         }
     }
 
+    /// Returns the `FeMasterHandle` for the session, spawning one if it does not exist or if the
+    /// existing handle is no longer alive.
+    /// Each session should have at most one `FeMasterHandle`. Multiple viewers of the same session
+    /// share that handle so they can reuse the replay buffer and avoid spawning multiple tmux
+    /// clients for the same session.
     pub async fn get_or_spawn(
         self: &Arc<Self>,
         session_id: Uuid,
@@ -220,8 +310,16 @@ impl FeMasterRegistry {
         };
 
         if let Some(existing) = existing {
-            existing.on_connect().await;
-            return Ok(existing);
+            if !existing.is_alive() {
+                let removed = self.masters.write().unwrap().remove(&session_id);
+                self.session_names.write().unwrap().remove(&session_id);
+                if let Some(stale) = removed {
+                    stale.shutdown().await;
+                }
+            } else {
+                existing.on_connect().await;
+                return Ok(existing);
+            }
         }
 
         let handle = FeMasterHandle::spawn(&session_name, &session_host).await?;

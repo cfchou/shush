@@ -1,0 +1,54 @@
+### shush API manual test snippets
+### Base URL
+@base = http://127.0.0.1:8100
+
+### Create local session
+POST {{base}}/api/sessions
+Content-Type: application/json
+
+{
+  "name": "dev-local",
+  "host": ""
+}
+
+### Create remote session (SSH alias)
+POST {{base}}/api/sessions
+Content-Type: application/json
+
+{
+  "name": "dev-1",
+  "host": "shush-docker"
+}
+
+### List sessions
+GET {{base}}/api/sessions
+
+### Get one session (replace id)
+GET {{base}}/api/sessions/{{sessionId}}
+
+### Submit command
+POST {{base}}/api/sessions/{{sessionId}}?action=submit
+Content-Type: application/json
+
+{
+  "command": "echo hello"
+}
+
+### Approve current pending command
+POST {{base}}/api/sessions/{{sessionId}}?action=approve
+
+### Deny current pending command
+POST {{base}}/api/sessions/{{sessionId}}?action=deny
+
+### List command cards (newest first)
+GET {{base}}/api/sessions/{{sessionId}}/commands?limit=10
+
+### Delete session
+DELETE {{base}}/api/sessions/{{sessionId}}
+
+### WebSocket stream (use a WS client)
+### URL: ws://127.0.0.1:8100/api/sessions/{{sessionId}}/stream
+### Expected server messages:
+### {"type":"snapshot","data":"<base64>"}
+### {"type":"terminal","data":"<base64>"}
+### {"type":"card","card":{...}}

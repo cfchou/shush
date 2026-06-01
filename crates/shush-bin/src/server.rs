@@ -137,6 +137,7 @@ async fn handle_socket(
         return;
     };
 
+    // send snapshot to the newly connected viewer
     if socket
         .send(Message::Text(snapshot_msg.into()))
         .await
@@ -147,20 +148,53 @@ async fn handle_socket(
     }
 
     let mut rx = handle.subscribe();
+    let is_additional_viewer = handle.viewer_count() > 1;
+
+    if is_additional_viewer {
+        let replay = handle.replay_bytes().await;
+        if !replay.is_empty() {
+            let encoded = fe_master::encode_terminal_chunk(&replay);
+            let message = StreamMessage {
+                msg_type: "terminal",
+                data: &encoded,
+            };
+            let Ok(payload) = serde_json::to_string(&message) else {
+                let _ = registry.on_disconnect(session_id).await;
+                let _ = socket.close().await;
+                return;
+            };
+            // Send the replay_buffer to the newly connected viewer in order
+            // to fill the gap between the snapshot and the current state of
+            // the session. Overlap is possible between the snapshot and the
+            // replay buffer, but it's acceptable since terminal streams are
+            // like stream of operations such as "move cursor here", "write
+            // these chars", etc., so re-applying some operations is not a
+            // problem most of the time.
+            if socket.send(Message::Text(payload.into())).await.is_err() {
+                let _ = registry.on_disconnect(session_id).await;
+                return;
+            }
+        }
+    }
 
     loop {
         tokio::select! {
             recv = rx.recv() => {
-                let Ok(chunk) = recv else {
+                let Ok(event) = recv else {
                     break;
                 };
-                let encoded = fe_master::encode_terminal_chunk(&chunk);
-                let message = StreamMessage { msg_type: "terminal", data: &encoded };
-                let Ok(payload) = serde_json::to_string(&message) else {
-                    break;
-                };
-                if socket.send(Message::Text(payload.into())).await.is_err() {
-                    break;
+                match event {
+                    fe_master::FeEvent::Chunk(chunk) => {
+                        let encoded = fe_master::encode_terminal_chunk(&chunk);
+                        let message = StreamMessage { msg_type: "terminal", data: &encoded };
+                        let Ok(payload) = serde_json::to_string(&message) else {
+                            break;
+                        };
+                        if socket.send(Message::Text(payload.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    fe_master::FeEvent::Closed => break,
                 }
             }
             inbound = socket.recv() => {

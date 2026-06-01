@@ -124,6 +124,21 @@ function base64ToUint8Array(b64: string): Uint8Array {
 
 No frame synchronisation, no ACK, no back-pressure protocol needed for v0.1.
 
+### Implementation addendum (2026-06-01)
+
+During remote monitor hardening (Issue 08), two pragmatic additions were introduced:
+
+1. **Late-join bootstrap replay**
+   - On additional viewer join, SS may send a bounded replay of recent FE terminal bytes immediately after `snapshot`.
+   - This is still sent as normal `{"type":"terminal","data":"<b64>"}` messages.
+   - Purpose: reduce transient blank/incomplete state for viewers joining an already-live FE stream.
+
+2. **Client-side LF normalization**
+   - Browser monitor normalizes lone `\n` to `\r\n` before `terminal.write(...)`.
+   - Purpose: avoid line-start drift artifacts observed in remote attach/detach workflows.
+
+These are implementation-level mitigations and do not change the core architecture (PTY-backed FE stream, base64 WS transport, xterm.js rendering pipeline).
+
 ### Flow control (v0.1: optional, noted for future)
 
 If SS sends data faster than xterm.js can parse, the internal buffer grows unboundedly. The xterm.js docs recommend pausing the source when the `write()` callback has not yet fired:
@@ -152,6 +167,8 @@ For v0.1 — a single human watching a terminal — the throughput is nowhere ne
 - xterm.js renders at the browser's display rate (≤ 60 fps). Under very high output volume, the last rendered frame may skip intermediate states. For the shush use case (command output monitoring) this is acceptable.
 - The base64 encoding adds ~33% wire overhead compared to binary WebSocket frames. Acceptable for v0.1; binary frames with `ArrayBuffer` can replace it later if needed.
 - No flow control in v0.1. If a command produces gigabytes of output, the WebSocket buffer and xterm.js internal buffer will grow. Mitigated by the fact that shush is loopback-only and the session owner is watching — they would abort before this became a problem.
+- Bootstrap replay may duplicate a short region around initial join (snapshot + replay overlap). Accepted for v0.1 in exchange for improved late-join stability.
+- LF normalization means browser input is no longer a strict byte-for-byte mirror of transport payload for newline bytes.
 
 ---
 

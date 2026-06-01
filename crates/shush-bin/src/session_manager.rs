@@ -5,6 +5,9 @@ use std::sync::RwLock;
 use tracing::error;
 use uuid::Uuid;
 
+const MONITOR_COLS: &str = "220";
+const MONITOR_ROWS: &str = "50";
+
 pub struct SessionManager {
     sessions: RwLock<HashMap<Uuid, Session>>,
 }
@@ -25,10 +28,34 @@ impl SessionManager {
                 false
             });
 
+        // Create a detached session if it doesn't exist
         if !exists {
             // '-d' detaches the session
             let _ = remote_tmux::run_tmux_status(&host, &["new-session", "-d", "-s", &name]);
         }
+
+        // Configure the tmux session's window size to be fixed and
+        // deterministic.
+        //
+        // By default, tmux's window-size option is set to latest — meaning
+        // the window automatically resizes to match the size of the most
+        // recently attached client.
+        let _ = remote_tmux::run_tmux_status(
+            &host,
+            &["set-window-option", "-t", &name, "window-size", "manual"],
+        );
+        let _ = remote_tmux::run_tmux_status(
+            &host,
+            &[
+                "resize-window",
+                "-t",
+                &name,
+                "-x",
+                MONITOR_COLS,
+                "-y",
+                MONITOR_ROWS,
+            ],
+        );
 
         let session = Session {
             id: Uuid::new_v4(),
@@ -65,6 +92,7 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::process::Command;
 
     #[test]
     fn new_manager_list_is_empty() {
@@ -111,5 +139,47 @@ mod tests {
     fn delete_missing_returns_false() {
         let mgr = SessionManager::new();
         assert!(!mgr.delete(Uuid::new_v4()));
+    }
+
+    #[tokio::test]
+    async fn create_sets_manual_window_size_for_monitor_stability() {
+        let mgr = SessionManager::new();
+        let session = mgr.create(format!("size-lock-{}", Uuid::new_v4()), "".into());
+
+        let option_output = Command::new("tmux")
+            .args([
+                "-L",
+                remote_tmux::TMUX_SOCKET,
+                "show-window-options",
+                "-t",
+                &session.name,
+                "window-size",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(option_output.status.success());
+        let option_text = String::from_utf8_lossy(&option_output.stdout);
+        assert!(option_text.contains("window-size manual"));
+
+        let size_output = Command::new("tmux")
+            .args([
+                "-L",
+                remote_tmux::TMUX_SOCKET,
+                "display-message",
+                "-p",
+                "-t",
+                &session.name,
+                "#{window_width}x#{window_height}",
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(size_output.status.success());
+        let size_text = String::from_utf8_lossy(&size_output.stdout);
+        assert_eq!(
+            size_text.trim(),
+            format!("{}x{}", MONITOR_COLS, MONITOR_ROWS)
+        );
     }
 }

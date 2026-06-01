@@ -7,6 +7,7 @@ pub fn is_local_host(host: &str) -> bool {
     host.is_empty() || host == "localhost"
 }
 
+/// Runs a tmux command with provided args on the remote or local, returning the exit status.
 pub fn run_tmux_status(host: &str, tmux_args: &[&str]) -> io::Result<ExitStatus> {
     if is_local_host(host) {
         Command::new("tmux")
@@ -43,6 +44,7 @@ pub async fn run_tmux_output(host: &str, tmux_args: &[&str]) -> io::Result<Outpu
 }
 
 fn apply_ssh_config(cmd: &mut Command) {
+    cmd.args(["-o", "BatchMode=yes"]);
     if let Ok(config) = std::env::var("SHUSH_SSH_CONFIG") {
         if !config.is_empty() {
             cmd.args(["-F", &config]);
@@ -51,6 +53,7 @@ fn apply_ssh_config(cmd: &mut Command) {
 }
 
 fn apply_ssh_config_async(cmd: &mut tokio::process::Command) {
+    cmd.args(["-o", "BatchMode=yes"]);
     if let Ok(config) = std::env::var("SHUSH_SSH_CONFIG") {
         if !config.is_empty() {
             cmd.args(["-F", &config]);

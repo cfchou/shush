@@ -143,36 +143,82 @@ test.describe("remote monitor coverage", () => {
   test("remote monitor deep-link and reconnect snapshot", async ({ page }) => {
     const sshConfig = remoteSshConfigPath();
     await access(sshConfig);
-  const backend: Backend = {
+    const backend: Backend = {
       kind: "remote",
       host: process.env.SHUSH_E2E_REMOTE_HOST ?? "shush-docker",
       sshConfig,
       label: "remote",
     };
     const session = await createSession(backend);
-  try {
-    const seed = `remote-seed-${randomUUID().slice(0, 8)}`;
-    await sendVisibleLine(backend, session.name, seed);
+    try {
+      const seed = `remote-seed-${randomUUID().slice(0, 8)}`;
+      await sendVisibleLine(backend, session.name, seed);
 
-    await installWsProbe(page);
-    await page.goto(`/monitor/${encodeURIComponent(session.id)}`);
-    await expect(page.locator(".monitor-page")).toBeVisible();
-    if (isStreamAssertEnabled()) {
-      await expect.poll(() => streamContains(page, seed)).toBe(true);
-    }
+      await installWsProbe(page);
+      await page.goto(`/monitor/${encodeURIComponent(session.id)}`);
+      await expect(page.locator(".monitor-page")).toBeVisible();
+      if (isStreamAssertEnabled()) {
+        await expect.poll(() => streamContains(page, seed)).toBe(true);
+      }
 
-    const live = `remote-live-${randomUUID().slice(0, 8)}`;
-    await sendVisibleLine(backend, session.name, live);
-    if (isStreamAssertEnabled()) {
-      await expect.poll(() => streamContains(page, live)).toBe(true);
-    }
+      const live = `remote-live-${randomUUID().slice(0, 8)}`;
+      await sendVisibleLine(backend, session.name, live);
+      if (isStreamAssertEnabled()) {
+        await expect.poll(() => streamContains(page, live)).toBe(true);
+      }
 
-    await runtime.restart();
-    if (isStreamAssertEnabled()) {
-      await expect.poll(() => streamContains(page, live), {
-        timeout: 35_000,
-      }).toBe(true);
+      await runtime.restart();
+      if (isStreamAssertEnabled()) {
+        await expect.poll(() => streamContains(page, live), {
+          timeout: 35_000,
+        }).toBe(true);
+      }
+    } finally {
+      await deleteSession(session.id);
     }
+  });
+
+  test("remote monitor keeps LF-only command output aligned", async ({ page }) => {
+    const sshConfig = remoteSshConfigPath();
+    await access(sshConfig);
+    const backend: Backend = {
+      kind: "remote",
+      host: process.env.SHUSH_E2E_REMOTE_HOST ?? "shush-docker",
+      sshConfig,
+      label: "remote-lf-alignment",
+    };
+    const session = await createSession(backend);
+
+    try {
+      await installWsProbe(page);
+      await page.goto(`/monitor/${encodeURIComponent(session.id)}`);
+      await expect(page.locator(".monitor-page")).toBeVisible();
+
+      await sendShellCommand(backend, session.name, "printf 'AA\\nBB\\nCC\\n'");
+
+      await expect
+        .poll(async () => {
+          return await page.evaluate(() => {
+            const rowEls = Array.from(
+              document.querySelectorAll(".xterm-rows > div"),
+            ) as HTMLDivElement[];
+            const rows = rowEls.map((el) => el.textContent ?? "");
+            return rows.join("\n");
+          });
+        })
+        .toContain("\nBB");
+
+      await expect
+        .poll(async () => {
+          return await page.evaluate(() => {
+            const rowEls = Array.from(
+              document.querySelectorAll(".xterm-rows > div"),
+            ) as HTMLDivElement[];
+            const rows = rowEls.map((el) => el.textContent ?? "");
+            return rows.join("\n");
+          });
+        })
+        .toContain("\nCC");
     } finally {
       await deleteSession(session.id);
     }
@@ -216,8 +262,7 @@ async function deleteSession(sessionId: string): Promise<void> {
 }
 
 async function sendVisibleLine(backend: Backend, sessionName: string, line: string): Promise<void> {
-  const payload = shellQuote(`echo ${line}`);
-  const cmd = `tmux -L shush send-keys -t ${sessionName} ${payload} Enter`;
+  const cmd = tmuxSendKeysCmd(sessionName, `echo ${line}`);
   if (backend.kind === "local") {
     await runCommand("bash", ["-lc", cmd], repoRoot);
   } else {
@@ -225,6 +270,24 @@ async function sendVisibleLine(backend: Backend, sessionName: string, line: stri
   }
 
   await waitForCapturedLine(backend, sessionName, line);
+}
+
+async function sendShellCommand(
+  backend: Backend,
+  sessionName: string,
+  command: string,
+): Promise<void> {
+  const cmd = tmuxSendKeysCmd(sessionName, command);
+  if (backend.kind === "local") {
+    await runCommand("bash", ["-lc", cmd], repoRoot);
+  } else {
+    await runCommand("ssh", ["-F", backend.sshConfig, backend.host, cmd], repoRoot);
+  }
+}
+
+function tmuxSendKeysCmd(sessionName: string, shellCommand: string): string {
+  const payload = shellQuote(shellCommand);
+  return `tmux -L shush send-keys -t ${sessionName} ${payload} Enter`;
 }
 
 async function waitForTmuxSession(

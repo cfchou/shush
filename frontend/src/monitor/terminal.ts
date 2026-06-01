@@ -25,14 +25,18 @@ export class TerminalView {
   }
 
   write(data: Uint8Array): void {
-    this.term.write(data);
+    this.term.write(data, () => {
+      this.term.refresh(0, this.term.rows - 1);
+    });
   }
 
   clear(): void {
     this.term.reset();
+    this.term.refresh(0, this.term.rows - 1);
   }
 
   fit(): void {
     this.fitAddon.fit();
+    this.term.refresh(0, this.term.rows - 1);
   }
 }
