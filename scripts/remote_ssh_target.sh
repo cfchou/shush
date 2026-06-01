@@ -12,17 +12,19 @@ SSH_CONFIG="${HOME_DIR}/.ssh/config"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [start|stop|cleanup]
+Usage: $(basename "$0") [start|stop|restart|cleanup]
 
 Commands:
   start    Build image, start container, and verify SSH/tmux (default)
   stop     Stop and remove the remote SSH container
+  restart  Stop container, then start target again
   cleanup  Stop/remove container and delete local generated SSH artifacts
 
 Examples:
   ./scripts/remote_ssh_target.sh
   ./scripts/remote_ssh_target.sh start
   ./scripts/remote_ssh_target.sh stop
+  ./scripts/remote_ssh_target.sh restart
   ./scripts/remote_ssh_target.sh cleanup
 EOF
 }
@@ -91,6 +93,10 @@ start)
   ;;
 stop)
   stop_container
+  ;;
+restart)
+  stop_container
+  start_target
   ;;
 cleanup)
   cleanup_all
