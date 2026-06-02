@@ -120,6 +120,36 @@ Move command completion detection off the FE stream and onto a persistent tmux c
 - [ ] Remote monitor Playwright regression test passes with `SHUSH_E2E_REMOTE=1 SHUSH_E2E_ASSERT_STREAM=1`
 - [ ] `cargo test` passes
 
+## Temporary Investigation Changes To Revisit
+
+These changes were added primarily to surface and investigate this blocker. Keep them under review while implementing the real control-mode fix.
+
+Likely to keep as regression coverage:
+
+- `frontend/e2e/monitor.e2e.ts`
+  - remote approve-flow regression test
+  - before/after screenshots
+  - assertions for visible command/output and absence of marker garbage
+
+Temporary or likely to be replaced by the final `09_1` implementation:
+
+- `crates/shush-bin/src/command_executor.rs`
+  - current FE-stream-based `wait_for_completion(...)` path
+  - should likely be replaced once completion is driven from control-mode `%output`
+- `crates/shush-bin/src/remote_tmux.rs`
+  - remote shell-quoted tmux helper
+  - may become unnecessary if final command execution is routed through a persistent control-mode client
+
+Support / strict-validation changes that may or may not remain after `09_1` is complete:
+
+- `frontend/package.json`
+- `frontend/package-lock.json`
+  - `@types/node` added for Playwright/TS support code
+- `scripts/run_remote_e2e.sh`
+  - currently forces `SHUSH_E2E_ASSERT_STREAM=1`
+  - keep if strict monitor-stream validation should remain the default remote E2E mode
+  - relax if that is too strict for the normal developer workflow
+
 ## Blocks / Related
 
 - Blocks finishing `docs/issues/09-command-queue-submit-approve-deny.md`
