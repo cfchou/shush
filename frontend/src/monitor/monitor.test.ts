@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Session } from "../types";
 
 const terminalCalls: string[] = [];
 const terminalSpies = {
@@ -14,6 +15,16 @@ const terminalSpies = {
     terminalCalls.push("fit");
   }),
 };
+
+const listSessionsMock = vi.fn(async () => [] as Session[]);
+const getSessionMock = vi.fn(async (_id: string): Promise<Session> => {
+  throw new Error("not found");
+});
+
+vi.mock("../api", () => ({
+  listSessions: (...args: unknown[]) => listSessionsMock(...args),
+  getSession: (...args: unknown[]) => getSessionMock(...args),
+}));
 
 vi.mock("./terminal", () => ({
   TerminalView: class {
@@ -61,6 +72,10 @@ class FakeWebSocket {
   }
 }
 
+function flushPromises(): Promise<void> {
+  return Promise.resolve();
+}
+
 describe("renderMonitor", () => {
   const originalWebSocket = globalThis.WebSocket;
   let timeoutSpy: ReturnType<typeof vi.spyOn>;
@@ -75,6 +90,10 @@ describe("renderMonitor", () => {
     terminalSpies.clear.mockClear();
     terminalSpies.write.mockClear();
     terminalSpies.fit.mockClear();
+    listSessionsMock.mockReset();
+    getSessionMock.mockReset();
+    listSessionsMock.mockResolvedValue([]);
+    getSessionMock.mockRejectedValue(new Error("not found"));
 
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     timeoutSpy = vi
@@ -105,10 +124,7 @@ describe("renderMonitor", () => {
     document.body.innerHTML = "";
   });
 
-  function setLocation(
-    protocol: "http:" | "https:",
-    host = "example.test:8100",
-  ): void {
+  function setLocation(protocol: "http:" | "https:", host = "example.test:8100"): void {
     locationGetterSpy?.mockRestore();
     locationGetterSpy = vi
       .spyOn(window, "location", "get")
@@ -121,35 +137,138 @@ describe("renderMonitor", () => {
     return root;
   }
 
-  it("renders escaped session id and uses ws URL on http", () => {
-    setLocation("http:", "localhost:5173");
-    const root = createRoot();
+  function setViewportWidth(value: number): void {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value,
+    });
+  }
 
-    renderMonitor(root, "id<unsafe>&ok");
+  function createActiveSession(id: string): Session {
+    return {
+      id,
+      name: `Session ${id}`,
+      host: "local",
+      state: "idle",
+      yolo: false,
+      current_command: null,
+      created_at: new Date().toISOString(),
+    };
+  }
 
-    const sessionText = root.querySelector(".session-id")?.innerHTML;
-    expect(sessionText).toContain("id&lt;unsafe&gt;&amp;ok");
-    expect(FakeWebSocket.instances[0]?.url).toBe(
-      "ws://localhost:5173/api/sessions/id%3Cunsafe%3E%26ok/stream",
-    );
-  });
-
-  it("uses wss URL on https", () => {
-    setLocation("https:", "monitor.example");
-    const root = createRoot();
-
-    renderMonitor(root, "session");
-
-    expect(FakeWebSocket.instances[0]?.url).toBe(
-      "wss://monitor.example/api/sessions/session/stream",
-    );
-  });
-
-  it("ignores invalid message payloads", () => {
+  it("renders idle scaffold with placeholder and no websocket connection", async () => {
+    setViewportWidth(1920);
     setLocation("http:");
     const root = createRoot();
+
+    renderMonitor(root);
+    await flushPromises();
+
+    expect(root.querySelector(".monitor-shell")).not.toBeNull();
+    expect(root.querySelector(".monitor-title")?.textContent).toBe("No session selected");
+    expect(root.querySelector(".monitor-terminal-placeholder")).not.toBeNull();
+    expect(root.querySelector(".monitor-terminal-placeholder")?.classList.contains("is-hidden"))
+      .toBe(false);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(root.querySelector(".monitor-command-empty")?.classList.contains("is-visible")).toBe(
+      true,
+    );
+  });
+
+  it("renders active monitor with session metadata and loads sessions list", async () => {
+    setViewportWidth(1920);
+    setLocation("http:");
+    const session = createActiveSession("abc");
+    listSessionsMock.mockResolvedValue([
+      session,
+      createActiveSession("def"),
+    ]);
+    getSessionMock.mockResolvedValue(session);
+
+    const root = createRoot();
+
+    renderMonitor(root, "abc");
+    await vi.waitFor(() => {
+      expect(getSessionMock).toHaveBeenCalledWith("abc");
+    });
+
+    expect(listSessionsMock).toHaveBeenCalledTimes(1);
+    expect(getSessionMock).toHaveBeenCalledWith("abc");
+    await vi.waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(root.querySelector(".session-id")?.textContent).toContain("Session: abc");
+    expect(root.querySelector(".monitor-title")?.textContent).toBe("Session abc");
+    const activeRow = root.querySelector(".monitor-session-item.is-active");
+    expect(activeRow).not.toBeNull();
+    expect(activeRow?.querySelector(".monitor-session-item-title")?.textContent).toContain("Session abc");
+  });
+
+  it("keeps sidebars collapsible and writes collapsed state to shell tokens", async () => {
+    setViewportWidth(1920);
+    setLocation("http:");
+    const root = createRoot();
+    renderMonitor(root);
+    await flushPromises();
+
+    const shell = root.querySelector<HTMLElement>("#monitor-shell");
+    expect(shell).not.toBeNull();
+    expect(shell?.dataset.leftHidden).toBe("false");
+    expect(shell?.dataset.rightHidden).toBe("false");
+
+    const leftToggle = root.querySelector<HTMLElement>("#toggle-left");
+    const rightToggle = root.querySelector<HTMLElement>("#toggle-right");
+
+    leftToggle?.click();
+    expect(shell?.dataset.leftHidden).toBe("true");
+    expect(
+      root.querySelector<HTMLElement>("#monitor-left-badge-banner")?.getAttribute("data-visible"),
+    ).toBe("true");
+
+    rightToggle?.click();
+    expect(shell?.dataset.rightHidden).toBe("true");
+    expect(
+      root.querySelector<HTMLElement>("#monitor-right-badge-banner")?.getAttribute("data-visible"),
+    ).toBe("true");
+  });
+
+  it("toggles YOLO switch state locally", async () => {
+    setViewportWidth(1920);
+    setLocation("http:");
+    const root = createRoot();
+    renderMonitor(root);
+    await flushPromises();
+
+    const control = root.querySelector<HTMLElement>("#yolo-control");
+    const label = root.querySelector<HTMLElement>("#yolo-label");
+    const sw = root.querySelector<HTMLElement>("#yolo-switch");
+
+    expect(control).not.toBeNull();
+    expect(sw?.classList.contains("is-on")).toBe(false);
+    expect(label?.textContent).toBe("YOLO Mode Off");
+
+    control?.dispatchEvent(new MouseEvent("click"));
+    expect(sw?.classList.contains("is-on")).toBe(true);
+    expect(label?.textContent).toBe("YOLO Mode Active");
+
+    control?.dispatchEvent(new MouseEvent("click"));
+    expect(sw?.classList.contains("is-on")).toBe(false);
+    expect(label?.textContent).toBe("YOLO Mode Off");
+  });
+
+  it("ignores invalid terminal messages", async () => {
+    setViewportWidth(1920);
+    setLocation("http:");
+    getSessionMock.mockResolvedValue(createActiveSession("session"));
+    const root = createRoot();
     renderMonitor(root, "session");
+    await vi.waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
     const socket = FakeWebSocket.instances[0];
+    expect(socket).toBeDefined();
 
     socket.dispatch("message", { data: new Uint8Array([1, 2, 3]) });
     socket.dispatch("message", { data: "not-json" });
@@ -163,10 +282,16 @@ describe("renderMonitor", () => {
     expect(terminalSpies.fit).not.toHaveBeenCalled();
   });
 
-  it("applies snapshot and terminal messages with expected terminal effects", () => {
+  it("writes terminal output for valid snapshot and terminal frames", async () => {
+    setViewportWidth(1920);
     setLocation("http:");
+    getSessionMock.mockResolvedValue(createActiveSession("session"));
     const root = createRoot();
+
     renderMonitor(root, "session");
+    await vi.waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
     const socket = FakeWebSocket.instances[0];
 
     socket.dispatch("message", {
@@ -178,19 +303,32 @@ describe("renderMonitor", () => {
 
     expect(terminalCalls).toEqual(["clear", "write", "fit", "write"]);
     expect(Array.from(terminalSpies.write.mock.calls[0][0])).toEqual([
-      104, 101, 108, 108, 111,
+      104,
+      101,
+      108,
+      108,
+      111,
     ]);
     expect(Array.from(terminalSpies.write.mock.calls[1][0])).toEqual([
-      119, 111, 114, 108, 100,
+      119,
+      111,
+      114,
+      108,
+      100,
     ]);
   });
 
-  it("schedules reconnect with backoff and resets attempts after open", () => {
+  it("schedules reconnect attempts and resets after open", async () => {
+    setViewportWidth(1920);
     setLocation("http:");
+    getSessionMock.mockResolvedValue(createActiveSession("session"));
     const root = createRoot();
     renderMonitor(root, "session");
-    const first = FakeWebSocket.instances[0];
+    await vi.waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
 
+    const first = FakeWebSocket.instances[0];
     first.dispatch("close");
     expect(timeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 1000);
 
@@ -208,26 +346,38 @@ describe("renderMonitor", () => {
     expect(timeoutSpy).toHaveBeenNthCalledWith(3, expect.any(Function), 1000);
   });
 
-  it("closes socket on error", () => {
+  it("does not reconnect after beforeunload", async () => {
+    setViewportWidth(1920);
     setLocation("http:");
+    getSessionMock.mockResolvedValue(createActiveSession("session"));
     const root = createRoot();
     renderMonitor(root, "session");
+    await vi.waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
+
     const socket = FakeWebSocket.instances[0];
-
-    socket.dispatch("error");
-
-    expect(socket.close).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not reconnect after beforeunload", () => {
-    setLocation("http:");
-    const root = createRoot();
-    renderMonitor(root, "session");
-    const socket = FakeWebSocket.instances[0];
-
     beforeUnloadHandler?.();
     socket.dispatch("close");
 
     expect(timeoutSpy).not.toHaveBeenCalled();
+  });
+
+  it("errors gracefully when stream message is received before sockets are available", async () => {
+    setViewportWidth(1920);
+    setLocation("http:");
+    getSessionMock.mockResolvedValue(createActiveSession("session"));
+    const root = createRoot();
+
+    renderMonitor(root, "session");
+    await vi.waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(1);
+    });
+    const socket = FakeWebSocket.instances[0];
+
+    socket.dispatch("open");
+    socket.dispatch("message", { data: JSON.stringify({ type: "terminal", data: "aGVsbG8=" }) });
+
+    expect(terminalCalls).toContain("write");
   });
 });

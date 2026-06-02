@@ -147,6 +147,30 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
   }
 });
 
+test("monitor shell renders and sidebar toggles", async ({ page }) => {
+  await page.setViewportSize({ width: 1900, height: 1200 });
+  await page.goto(`${runtime.baseUrl()}/monitor`);
+
+  const shell = page.locator(".monitor-shell");
+  const leftToggle = page.getByRole("button", { name: "Toggle sessions sidebar" });
+  const rightToggle = page.getByRole("button", { name: "Toggle command sidebar" });
+
+  await expect(shell).toBeVisible();
+  await expect(leftToggle).toBeVisible();
+  await expect(rightToggle).toBeVisible();
+
+  await leftToggle.click();
+  await expect(shell).toHaveClass(/is-left-hidden/);
+  await expect(page.getByText("Left sidebar hidden to preserve terminal space.")).toBeVisible();
+
+  await rightToggle.click();
+  await expect(shell).toHaveClass(/is-right-hidden/);
+  await expect(page.getByText("Right sidebar hidden to preserve terminal space.")).toBeVisible();
+
+  await leftToggle.click();
+  await expect(shell).not.toHaveClass(/is-left-hidden/);
+});
+
 test.describe("remote monitor coverage", () => {
   test.skip(
     !isRemoteEnabled(),
