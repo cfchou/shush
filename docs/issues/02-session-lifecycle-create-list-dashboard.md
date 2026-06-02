@@ -6,6 +6,10 @@ Status: ready-for-agent
 
 Create the `shush-bin` binary crate and implement the server scaffold with session create/list lifecycle, from Rust through REST API to browser dashboard.
 
+## Historical context
+
+This issue was written against earlier session/control-client API shape. Current implementation keeps same high-level behavior, but exact file layout and method names changed.
+
 **Binary scaffold:**
 - `shush-bin/Cargo.toml` with all dependencies (tokio, axum, clap, tower-http, tracing, reqwest, base64)
 - `main.rs` — clap dispatch: `shush server` and `shush client` subcommands
@@ -17,17 +21,30 @@ Create the `shush-bin` binary crate and implement the server scaffold with sessi
 
 **Session manager:**
 - `session_manager.rs` — `SessionManager` struct backed by `Arc<RwLock<HashMap<Uuid, Session>>>`
-- `create(name, host) -> Result<Uuid>` — create session struct, spawn tmux session + Control Mode client
+- Older sketch: `create(name, host) -> Result<Uuid>` — create session struct, spawn tmux session + Control Mode client
 - `delete(id)` — kill tmux session, remove from store
 - `get(id) -> Session`, `list() -> Vec<Session>`
 
+Current implementation differs:
+
+- `create(name, host) -> Session`
+- ensures tmux session exists and sizes window
+- defers SC control-mode attach until approved command execution
+- does not store a persistent control client directly inside `Session`
+
 **tmux_control:**
 - `tmux_control.rs` — `TmuxControlModeClient` struct
-- `spawn(session_name: &str) -> Result<Self>` — runs `tmux -L shush new-session -d -s <name>` then `tmux -L shush -CC attach -t <name>`
+- Older sketch: `spawn(session_name: &str) -> Result<Self>` — runs `tmux -L shush new-session -d -s <name>` then `tmux -L shush -CC attach -t <name>`
 - Manages child process stdin/stdout with Tokio
-- `event_stream() -> impl Stream<Item=TmuxEvent>` — async stream of parsed tmux events
+- Older sketch: `event_stream() -> impl Stream<Item=TmuxEvent>` — async stream of parsed tmux events
 - `send_keys(text: &str)` — writes to stdin (Control Mode command)
 - `active_pane: Option<String>` — tracked from window-pane-changed events
+
+Current implementation differs:
+
+- `spawn(session_name, session_host)`
+- `read_event()` loop instead of exported `event_stream()`
+- registry-based lifecycle in `TmuxControlModeRegistry`
 
 **REST endpoints:**
 - `POST /api/sessions` — create session

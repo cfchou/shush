@@ -20,11 +20,13 @@ Observed behavior in monitor:
 
 ## Root cause
 
-The current implementation is trying to detect command-completion markers from the FE monitor stream, but the repo's own architecture docs say marker detection should happen on the tmux control-mode `%output` stream instead.
+Historical root cause at time of filing:
+
+The implementation then was trying to detect command-completion markers from FE monitor stream, but repo architecture docs said marker detection should happen on tmux control-mode `%output` stream instead.
 
 Evidence:
 
-- Current code path:
+- Historical code path at filing time:
   - `crates/shush-bin/src/command_executor.rs`
   - `wait_for_completion()` subscribes to `FeMaster` chunks and feeds them into `MarkerDetector`
 - Architecture references:
@@ -40,6 +42,17 @@ So there are two separate bugs/gaps:
 
 1. Remote approved-command injection needed literal typing semantics.
 2. Even after that, using FE bytes for marker detection is architecturally wrong and does not produce reliable completion detection.
+
+## Current implementation note
+
+This issue is now completed.
+
+Current implementation:
+
+- uses `crates/shush-bin/src/tmux_control.rs` control-mode `%output` for marker completion
+- uses `crates/shush-bin/src/command_executor.rs` to wait for matching marker end events
+- keeps backend FE stream in `crates/shush-bin/src/fe_master.rs` browser-facing only
+- rewrites wrapped command echo for browser rendering and strips APC marker sequences before xterm render
 
 ## Reproduction
 
@@ -78,7 +91,7 @@ It covers:
 - before/after screenshots for Playwright artifacts
 - assertions for visible command/output and absence of marker garbage
 
-At handoff time, this scenario is expected to fail until the architectural fix below is implemented.
+At filing time, this scenario was expected to fail until architectural fix below was implemented.
 
 ## What to build
 
@@ -131,14 +144,13 @@ Likely to keep as regression coverage:
   - before/after screenshots
   - assertions for visible command/output and absence of marker garbage
 
-Temporary or likely to be replaced by the final `09_1` implementation:
+Historical notes from investigation phase:
 
 - `crates/shush-bin/src/command_executor.rs`
-  - current FE-stream-based `wait_for_completion(...)` path
-  - should likely be replaced once completion is driven from control-mode `%output`
+  - at filing time had FE-stream-based `wait_for_completion(...)` path
 - `crates/shush-bin/src/remote_tmux.rs`
   - remote shell-quoted tmux helper
-  - may become unnecessary if final command execution is routed through a persistent control-mode client
+  - remained useful during transition to persistent control-mode client
 
 Support / strict-validation changes that may or may not remain after `09_1` is complete:
 

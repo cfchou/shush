@@ -4,6 +4,8 @@ Status: ready-for-agent
 
 Priority: HIGHEST — FE must connect and see the tmux session
 
+Terminology note: `FE` here means frontend-facing backend stream handled by `crates/shush-bin/src/fe_master.rs`, not browser TypeScript code under `frontend/`.
+
 ## What to build
 
 Implement the FE master connection lifecycle and WebSocket terminal stream, so the browser can connect and see live tmux output.
@@ -17,7 +19,11 @@ Implement the FE master connection lifecycle and WebSocket terminal stream, so t
   - New connect during idle timer → cancel timer, keep FE master alive
 - Reader task (tokio::spawn): reads FE stdout in chunks, sends to broadcast channel
 
-**ws.rs:**
+**Historical file naming note:**
+
+This issue refers to `ws.rs` and older split route modules. Current implementation is primarily in `crates/shush-bin/src/server.rs` plus backend `fe_master.rs`.
+
+**Superseded route/module naming (`ws.rs`):**
 - `ws_handler` — Axum WebSocket upgrade at `GET /api/sessions/:id/stream`
 - On connect:
   1. Get or create FeMaster for this session
@@ -62,5 +68,5 @@ Implement the FE master connection lifecycle and WebSocket terminal stream, so t
 
 ## References
 
-- Plan: `docs/shush-v01-plan.md` (Phase 4 ws.rs, Phase 5 terminal.ts + monitor.ts)
+- Plan: `docs/shush-v01-plan.md` (current `server.rs` WebSocket behavior, FE stream notes, terminal/monitor sections)
 - FE connection lifecycle: plan Key Decisions table, FE connection row
