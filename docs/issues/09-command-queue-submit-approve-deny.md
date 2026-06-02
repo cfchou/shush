@@ -38,15 +38,38 @@ Priority: high
 
 ## Acceptance criteria
 
-- [ ] `POST ?action=submit -d '{"command":"echo hello"}'` returns session with `current_command` in PENDING
-- [ ] `POST ?action=approve` transitions command to EXECUTING, session to EXECUTING
-- [ ] `POST ?action=deny` transitions command to REJECTED, session back to IDLE
+- [x] `POST ?action=submit -d '{"command":"echo hello"}'` returns session with `current_command` in PENDING
+- [x] `POST ?action=approve` transitions command to EXECUTING, session to EXECUTING
+- [x] `POST ?action=deny` transitions command to REJECTED, session back to IDLE
 - [ ] Command execution completes normally: card reaches Completed(0), session back to IDLE
-- [ ] Marker detection works: command output before/after markers is captured as card output
-- [ ] `GET /api/sessions/:id/commands?limit=10` returns JSON array of past cards, newest first
-- [ ] Card state changes are pushed as `{"type":"card"...}` messages on WS (visible in browser console)
-- [ ] Queue permits at most one pending/executing command; submit during pending returns error or enqueues
-- [ ] `cargo test` passes
+- [x] Marker detection works: command output before/after markers is captured as card output
+- [x] `GET /api/sessions/:id/commands?limit=10` returns JSON array of past cards, newest first
+- [x] Card state changes are pushed as `{"type":"card"...}` messages on WS (visible in browser console)
+- [x] Queue permits at most one pending/executing command; submit during pending returns error or enqueues
+- [x] `cargo test` passes
+
+## Blocker Note
+
+Validated in this issue:
+
+- submit/approve/deny REST behavior
+- command history listing
+- WS card push
+- `cargo test`
+
+Not yet validated / still blocked:
+
+- reliable command completion to `Completed(0)` and session return to `IDLE` for the real remote submit + approve path
+
+Blocker summary:
+
+- remote approved-command injection needed literal typing semantics
+- after hardening that path, the deeper blocker remains that command completion is currently detected from the FE monitor stream
+- the repo architecture docs indicate marker detection should be driven from tmux control-mode `%output` instead
+
+Follow-up issue:
+
+- `docs/issues/09_1-command-queue-marker-detection-on-control-mode.md`
 
 ## Blocked by
 
