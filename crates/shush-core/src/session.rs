@@ -2,6 +2,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Session lifecycle state machine:
+///
+/// Idle -> Pending -> Executing -> Idle
+///           |
+///           +-----------------> Idle
+///
+/// `Pending` and `Executing` mean there is an active `current_command`, and
+/// no new command can be accepted.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionState {
@@ -10,12 +18,20 @@ pub enum SessionState {
     Executing,
 }
 
+/// Command lifecycle state machine:
+///
+/// Pending -> Executing -> Completed
+///  |               |
+///  +-> Rejected    +-> Aborted
+///
+/// `Completed` indicates successful or failed process termination; the
+/// concrete exit status is stored in `CommandCard.exit_code`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandState {
     Pending,
     Executing,
-    Completed(i32),
+    Completed,
     Rejected,
     Aborted,
 }
@@ -54,6 +70,10 @@ pub struct Session {
     pub host: String,
     pub state: SessionState,
     pub yolo: bool,
+
+    // `current_command` is `Some` iff `state` is `Pending` or `Executing`.
+    // Whenever `current_command` transitions to `Completed`, `Rejected`, or
+    // `Aborted`, it is set to `None`. `state` becomes `Idle`.
     pub current_command: Option<CommandCard>,
     pub created_at: DateTime<Utc>,
 }

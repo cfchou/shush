@@ -67,11 +67,18 @@ impl CommandExecutor {
     }
 }
 
-async fn inject_wrapped_command(host: &str, session_name: &str, wrapped_command: &str) -> Result<(), String> {
+async fn inject_wrapped_command(
+    host: &str,
+    session_name: &str,
+    wrapped_command: &str,
+) -> Result<(), String> {
     let literal_send = if remote_tmux::is_local_host(host) {
-        remote_tmux::run_tmux_status_async(host, &["send-keys", "-l", "-t", session_name, wrapped_command])
-            .await
-            .map_err(|err| format!("send-keys -l failed: {err}"))?
+        remote_tmux::run_tmux_status_async(
+            host,
+            &["send-keys", "-l", "-t", session_name, wrapped_command],
+        )
+        .await
+        .map_err(|err| format!("send-keys -l failed: {err}"))?
     } else {
         remote_tmux::run_tmux_shell_status_async(
             host,
@@ -85,9 +92,10 @@ async fn inject_wrapped_command(host: &str, session_name: &str, wrapped_command:
         return Err(format!("send-keys -l exited with {literal_send}"));
     }
 
-    let enter_send = remote_tmux::run_tmux_status_async(host, &["send-keys", "-t", session_name, "Enter"])
-        .await
-        .map_err(|err| format!("send-keys Enter failed: {err}"))?;
+    let enter_send =
+        remote_tmux::run_tmux_status_async(host, &["send-keys", "-t", session_name, "Enter"])
+            .await
+            .map_err(|err| format!("send-keys Enter failed: {err}"))?;
 
     if !enter_send.success() {
         return Err(format!("send-keys Enter exited with {enter_send}"));

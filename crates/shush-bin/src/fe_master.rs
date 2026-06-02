@@ -17,11 +17,87 @@ use uuid::Uuid;
 const FE_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 const FE_BROADCAST_CAPACITY: usize = 512;
 const FE_REPLAY_BUFFER_MAX_BYTES: usize = 128 * 1024;
+const MARKER_ECHO_PREFIX: &[u8] = b"printf '\\033_BEGIN_";
+const MARKER_ECHO_SUFFIX: &[u8] = b"; unset __shush_exit";
 
 #[derive(Clone, Debug)]
 pub enum FeEvent {
     Chunk(Vec<u8>),
     Closed,
+}
+
+#[derive(Default)]
+struct MarkerEchoFilter {
+    pending: Vec<u8>,
+    stripping: bool,
+}
+
+impl MarkerEchoFilter {
+    fn filter_chunk(&mut self, chunk: &[u8]) -> Vec<u8> {
+        self.pending.extend_from_slice(chunk);
+        let mut output = Vec::new();
+
+        loop {
+            if self.stripping {
+                match find_subsequence(&self.pending, MARKER_ECHO_SUFFIX) {
+                    Some(index) => {
+                        let mut drain_end = index + MARKER_ECHO_SUFFIX.len();
+                        while drain_end < self.pending.len()
+                            && matches!(self.pending[drain_end], b'\r' | b'\n')
+                        {
+                            drain_end += 1;
+                        }
+                        self.pending.drain(..drain_end);
+                        self.stripping = false;
+                    }
+                    None => {
+                        self.pending.clear();
+                        break;
+                    }
+                }
+            } else {
+                match find_subsequence(&self.pending, MARKER_ECHO_PREFIX) {
+                    Some(index) => {
+                        output.extend_from_slice(&self.pending[..index]);
+                        self.pending.drain(..index + MARKER_ECHO_PREFIX.len());
+                        self.stripping = true;
+                    }
+                    None => {
+                        let keep = MARKER_ECHO_PREFIX.len().saturating_sub(1);
+                        if self.pending.len() > keep {
+                            let emit_len = self.pending.len() - keep;
+                            output.extend_from_slice(&self.pending[..emit_len]);
+                            self.pending.drain(..emit_len);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        output
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        if self.stripping {
+            Vec::new()
+        } else {
+            std::mem::take(&mut self.pending)
+        }
+    }
+}
+
+fn sanitize_marker_echoes(bytes: &[u8]) -> Vec<u8> {
+    let mut filter = MarkerEchoFilter::default();
+    let mut output = filter.filter_chunk(bytes);
+    output.extend(filter.finish());
+    output
+}
+
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 pub struct FeMasterHandle {
@@ -44,6 +120,7 @@ pub struct FeMasterHandle {
 
     // Ring buffer that accumulates raw PTY bytes as they arrive.
     replay_buffer: tokio::sync::Mutex<Vec<u8>>,
+    echo_filter: tokio::sync::Mutex<MarkerEchoFilter>,
 
     viewers: AtomicUsize,
     idle_task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
@@ -173,6 +250,7 @@ impl FeMasterHandle {
             master_guard: tokio::sync::Mutex::new(Some(master_guard)),
             reader_task: tokio::sync::Mutex::new(None),
             replay_buffer: tokio::sync::Mutex::new(Vec::new()),
+            echo_filter: tokio::sync::Mutex::new(MarkerEchoFilter::default()),
             viewers: AtomicUsize::new(0),
             idle_task: tokio::sync::Mutex::new(None),
             alive: AtomicBool::new(true),
@@ -194,10 +272,18 @@ impl FeMasterHandle {
                         break;
                     }
                     Ok(n) => {
+                        let filtered = {
+                            let mut filter = reader_handle.echo_filter.lock().await;
+                            filter.filter_chunk(&buf[..n])
+                        };
+                        if filtered.is_empty() {
+                            continue;
+                        }
+
                         // Write PTY bytes to two places:
                         // 1. accumulates in replay_buffer.
                         let mut replay = reader_handle.replay_buffer.lock().await;
-                        replay.extend_from_slice(&buf[..n]);
+                        replay.extend_from_slice(&filtered);
                         if replay.len() > FE_REPLAY_BUFFER_MAX_BYTES {
                             let excess = replay.len() - FE_REPLAY_BUFFER_MAX_BYTES;
                             replay.drain(..excess);
@@ -205,7 +291,7 @@ impl FeMasterHandle {
                         drop(replay);
 
                         // 2. broadcast to all viewers.
-                        let _ = reader_sender.send(FeEvent::Chunk(buf[..n].to_vec()));
+                        let _ = reader_sender.send(FeEvent::Chunk(filtered));
                     }
                     Err(err)
                         if matches!(
@@ -241,7 +327,10 @@ impl FeMasterHandle {
             return Err(format!("capture-pane exited with status {}", output.status));
         }
 
-        Ok(base64::engine::general_purpose::STANDARD.encode(output.stdout))
+        Ok(
+            base64::engine::general_purpose::STANDARD
+                .encode(sanitize_marker_echoes(&output.stdout)),
+        )
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<FeEvent> {
@@ -390,5 +479,27 @@ mod tests {
     fn encode_terminal_chunk_base64() {
         let got = encode_terminal_chunk(b"abc\n");
         assert_eq!(got, "YWJjCg==");
+    }
+
+    #[test]
+    fn sanitize_marker_echoes_removes_wrapped_command_from_snapshot() {
+        let raw = b"before\nprintf '\\033_BEGIN_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\\033\\\\'; echo hello; __shush_exit=$?; printf '\\033_END_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef_%s\\033\\\\' \"$__shush_exit\"; unset __shush_exit\nafter\n";
+
+        let filtered = sanitize_marker_echoes(raw);
+
+        assert_eq!(String::from_utf8_lossy(&filtered), "before\nafter\n");
+    }
+
+    #[test]
+    fn marker_echo_filter_handles_chunk_boundaries() {
+        let mut filter = MarkerEchoFilter::default();
+        let chunk1 = b"before\nprintf '\\033_BEGIN_deadbeefdeadbeef";
+        let chunk2 = b"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\\033\\\\'; echo hello; __shush_exit=$?; printf '\\033_END_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef_%s\\033\\\\' \"$__shush_exit\"; unset __shush_exit\nafter\n";
+
+        let mut filtered = filter.filter_chunk(chunk1);
+        filtered.extend(filter.filter_chunk(chunk2));
+        filtered.extend(filter.finish());
+
+        assert_eq!(String::from_utf8_lossy(&filtered), "before\nafter\n");
     }
 }

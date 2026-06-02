@@ -1,4 +1,5 @@
 mod cli;
+mod command_executor;
 mod fe_master;
 mod remote_tmux;
 mod server;

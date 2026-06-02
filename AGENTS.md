@@ -5,7 +5,6 @@
 
 - DO NOT commit unless user explicitly say so
 
-
 # Guideline
 
 - Only implement one issue at a time.
@@ -18,7 +17,9 @@
         - If it's a big gap, stop and then present the problem to the user.
         - Otherwise, launch subagents to research, write an ADR, then continue.
     * Tick the '[ ]' box of Acceptance Criteria in the issue when one is done.
-    * Always write unit tests.
+    * MUST write unit tests.
+    * SHOULD write E2E tests.
+    * MUST pass all tests before calling it done.
 
 - After implementation:
     * Request to update *Plans* after implementation to close any gap.

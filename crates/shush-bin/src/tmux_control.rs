@@ -1,3 +1,4 @@
+use shush_core::marker::{MarkerInjector, Nonce};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 // ── Control-mode client ──────────────────────────────────────────────────────
@@ -136,6 +137,15 @@ impl TmuxControlModeClient {
         } else {
             Err("no stdin available".into())
         }
+    }
+
+    #[allow(dead_code)]
+    pub async fn inject_command(&mut self, command: &str) -> Result<Nonce, String> {
+        let injector = MarkerInjector::new();
+        let (wrapped, nonce) = injector.inject(command);
+        self.send_keys(&wrapped).await?;
+        self.send_keys("Enter").await?;
+        Ok(nonce)
     }
 
     /// Read one line from the tmux event stream.  Returns `None` on EOF.

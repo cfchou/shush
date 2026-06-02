@@ -22,7 +22,10 @@ skills-lock.json
 # Temp
 tmp/
 .remote-ssh-*
+lcov.info
+
 
 # env
 .env
 mise.toml
+http-client.env.json

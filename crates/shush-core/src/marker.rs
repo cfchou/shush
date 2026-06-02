@@ -56,7 +56,7 @@ fn hex_val(b: u8) -> u8 {
 /// ```text
 /// ESC_BEGIN_<nonce>ESC\  <- Command start marker
 /// [actual command output]
-/// ESC_END_<nonce>ESC\    <- Command end marker
+/// ESC_END_<nonce>_<exit_code>ESC\  <- Command end marker
 /// ```
 #[derive(Debug)]
 pub struct MarkerInjector;
@@ -81,7 +81,7 @@ impl MarkerInjector {
         let nonce = generate_nonce();
         let nonce_hex = nonce.hex();
         let wrapped = format!(
-            "printf '\\033_BEGIN_{nonce_hex}\\033\\\\' && {command} && printf '\\033_END_{nonce_hex}\\033\\\\'"
+            "printf '\\033_BEGIN_{nonce_hex}\\033\\\\'; {command}; __shush_exit=$?; printf '\\033_END_{nonce_hex}_%s\\033\\\\' \"$__shush_exit\"; unset __shush_exit"
         );
         (wrapped, nonce)
     }
@@ -91,7 +91,7 @@ impl MarkerInjector {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MarkerEvent {
     Start(Nonce),
-    End(Nonce),
+    End(Nonce, i32),
 }
 
 /// Scans a byte stream for APC markers produced by MarkerInjector.
@@ -128,8 +128,7 @@ impl MarkerDetector {
                 continue;
             }
 
-            // Absolute minimum marker: ESC _ END_ <64 hex> ESC \
-            // = 1 + 1 + 4 + 64 + 1 + 1 = 72 bytes
+            // Absolute minimum marker: ESC _ END_ <64 hex> _ 0 ESC \
             if i + 72 > buflen {
                 break;
             }
@@ -148,22 +147,12 @@ impl MarkerDetector {
                 continue;
             }
 
-            let tag_len: usize = if is_start { 6 } else { 4 }; // "BEGIN_" or "END_"
+            let tag_len: usize = if is_start { 6 } else { 4 };
             let hex_start = i + 2 + tag_len;
             let hex_end = hex_start + 64;
 
-            // Must have trailing ESC \ after hex
-            if hex_end + 2 > buflen {
-                break;
-            }
-
             let hex_slice = &self.buffer[hex_start..hex_end];
             if !hex_slice.iter().all(|b| b.is_ascii_hexdigit()) {
-                i += 2;
-                continue;
-            }
-
-            if self.buffer[hex_end] != 0x1b || self.buffer[hex_end + 1] != b'\\' {
                 i += 2;
                 continue;
             }
@@ -172,12 +161,56 @@ impl MarkerDetector {
             let nonce = hex_decode_nonce(hex_str);
 
             if is_start {
+                if hex_end + 2 > buflen {
+                    break;
+                }
+                if self.buffer[hex_end] != 0x1b || self.buffer[hex_end + 1] != b'\\' {
+                    i += 2;
+                    continue;
+                }
                 events.push(MarkerEvent::Start(nonce));
+                i = hex_end + 2;
             } else {
-                events.push(MarkerEvent::End(nonce));
-            }
+                if hex_end + 1 >= buflen {
+                    break;
+                }
+                if self.buffer[hex_end] != b'_' {
+                    i += 2;
+                    continue;
+                }
 
-            i = hex_end + 2;
+                let exit_start = hex_end + 1;
+                let mut exit_end = exit_start;
+                if exit_end < buflen && self.buffer[exit_end] == b'-' {
+                    exit_end += 1;
+                }
+                while exit_end < buflen && self.buffer[exit_end].is_ascii_digit() {
+                    exit_end += 1;
+                }
+                if exit_end == exit_start
+                    || (self.buffer[exit_start] == b'-' && exit_end == exit_start + 1)
+                {
+                    if exit_end >= buflen {
+                        break;
+                    }
+                    i += 2;
+                    continue;
+                }
+                if exit_end + 2 > buflen {
+                    break;
+                }
+                if self.buffer[exit_end] != 0x1b || self.buffer[exit_end + 1] != b'\\' {
+                    i += 2;
+                    continue;
+                }
+
+                let exit_code =
+                    unsafe { std::str::from_utf8_unchecked(&self.buffer[exit_start..exit_end]) }
+                        .parse::<i32>()
+                        .unwrap_or_default();
+                events.push(MarkerEvent::End(nonce, exit_code));
+                i = exit_end + 2;
+            }
         }
 
         if i > 0 {
@@ -220,7 +253,7 @@ mod tests {
         let (_, nonce) = injector.inject("true");
 
         let start_marker = format!("\x1b_BEGIN_{}\x1b\\", nonce.hex());
-        let end_marker = format!("\x1b_END_{}\x1b\\", nonce.hex());
+        let end_marker = format!("\x1b_END_{}_0\x1b\\", nonce.hex());
         let stream = format!("{}some output\n{}", start_marker, end_marker);
 
         let mut detector = MarkerDetector::new();
@@ -228,7 +261,10 @@ mod tests {
 
         assert_eq!(
             events,
-            vec![MarkerEvent::Start(nonce.clone()), MarkerEvent::End(nonce)],
+            vec![
+                MarkerEvent::Start(nonce.clone()),
+                MarkerEvent::End(nonce, 0)
+            ],
         );
     }
 
@@ -240,7 +276,7 @@ mod tests {
         // Simulate a different nonce in the end marker
         let other = generate_nonce();
         let start_marker = format!("\x1b_BEGIN_{}\x1b\\", nonce.hex());
-        let bad_end = format!("\x1b_END_{}\x1b\\", other.hex());
+        let bad_end = format!("\x1b_END_{}_1\x1b\\", other.hex());
         let stream = format!("{}output{}", start_marker, bad_end);
 
         let mut detector = MarkerDetector::new();
@@ -248,7 +284,7 @@ mod tests {
 
         assert_eq!(events.len(), 2, "both markers should be detected");
         assert_eq!(events[0], MarkerEvent::Start(nonce));
-        assert_eq!(events[1], MarkerEvent::End(other));
+        assert_eq!(events[1], MarkerEvent::End(other, 1));
     }
 
     #[test]
@@ -258,7 +294,7 @@ mod tests {
         let nonce2 = generate_nonce();
 
         let m1 = format!("\x1b_BEGIN_{}\x1b\\", nonce1.hex());
-        let m2 = format!("\x1b_END_{}\x1b\\", nonce2.hex());
+        let m2 = format!("\x1b_END_{}_17\x1b\\", nonce2.hex());
 
         // Feed in two chunks so marker crosses the boundary
         let chunk1 = &m1.as_bytes()[..20];
@@ -273,7 +309,7 @@ mod tests {
 
         // Now feed the end marker
         let events = detector.feed(m2.as_bytes());
-        assert_eq!(events, vec![MarkerEvent::End(nonce2)]);
+        assert_eq!(events, vec![MarkerEvent::End(nonce2, 17)]);
     }
 
     #[test]
@@ -302,7 +338,7 @@ mod tests {
         let nonce = generate_nonce();
 
         let start = format!("\x1b_BEGIN_{}\x1b\\", nonce.hex());
-        let end = format!("\x1b_END_{}\x1b\\", nonce.hex());
+        let end = format!("\x1b_END_{}_0\x1b\\", nonce.hex());
         let garbage = b"random noise here!!!\x01\x02\x03";
 
         let stream = [start.as_bytes(), garbage, end.as_bytes()].concat();
@@ -310,7 +346,10 @@ mod tests {
 
         assert_eq!(
             events,
-            vec![MarkerEvent::Start(nonce.clone()), MarkerEvent::End(nonce)],
+            vec![
+                MarkerEvent::Start(nonce.clone()),
+                MarkerEvent::End(nonce, 0)
+            ],
             "detector should find both markers ignoring garbage"
         );
     }
