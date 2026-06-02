@@ -1,12 +1,12 @@
 use crate::{
-    fe_master::{FeEvent, FeMasterRegistry},
-    remote_tmux,
+    fe_master::FeMasterRegistry,
     session_manager::SessionManager,
+    tmux_control::{TmuxControlModeClient, TmuxControlModeRegistry},
 };
 use shush_core::marker::{MarkerDetector, MarkerEvent, MarkerInjector, Nonce};
 use shush_core::session::CommandState;
+use shush_core::tmux_event::TmuxEvent;
 use std::{sync::Arc, time::Duration};
-use tokio::sync::broadcast;
 use uuid::Uuid;
 
 const EXECUTION_TIMEOUT: Duration = Duration::from_secs(15);
@@ -14,13 +14,19 @@ const EXECUTION_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct CommandExecutor {
     session_manager: Arc<SessionManager>,
     fe_masters: Arc<FeMasterRegistry>,
+    control_mode: Arc<TmuxControlModeRegistry>,
 }
 
 impl CommandExecutor {
-    pub fn new(session_manager: Arc<SessionManager>, fe_masters: Arc<FeMasterRegistry>) -> Self {
+    pub fn new(
+        session_manager: Arc<SessionManager>,
+        fe_masters: Arc<FeMasterRegistry>,
+        control_mode: Arc<TmuxControlModeRegistry>,
+    ) -> Self {
         Self {
             session_manager,
             fe_masters,
+            control_mode,
         }
     }
 
@@ -39,16 +45,21 @@ impl CommandExecutor {
 
         let execution: Result<(), String> = async {
             let handle = self
-                .fe_masters
+                .control_mode
                 .get_or_spawn(session_id, session.name.clone(), session.host.clone())
                 .await?;
-            let mut rx = handle.subscribe();
+
+            let mut control = handle.lock().await;
 
             let injector = MarkerInjector::new();
             let (wrapped_command, nonce) = injector.inject(&current.command);
-            inject_wrapped_command(&session.host, &session.name, &wrapped_command).await?;
+            self.fe_masters
+                .queue_command_echo_replacement(session_id, current.command.as_bytes())
+                .await;
+            control.send_keys(&wrapped_command).await?;
+            control.send_key("Enter").await?;
 
-            let (exit_code, raw_output) = wait_for_completion(&mut rx, &nonce).await?;
+            let (exit_code, raw_output) = wait_for_completion(&mut *control, &nonce).await?;
             let output = extract_command_output(&raw_output, &nonce, exit_code);
             let resolved_by = if session.yolo { "yolo" } else { "human" };
             self.session_manager
@@ -59,6 +70,7 @@ impl CommandExecutor {
         .await;
 
         if let Err(err) = execution {
+            self.control_mode.remove(session_id).await;
             let _ = self.session_manager.fail_command(session_id, err.clone());
             return Err(err);
         }
@@ -67,45 +79,8 @@ impl CommandExecutor {
     }
 }
 
-async fn inject_wrapped_command(
-    host: &str,
-    session_name: &str,
-    wrapped_command: &str,
-) -> Result<(), String> {
-    let literal_send = if remote_tmux::is_local_host(host) {
-        remote_tmux::run_tmux_status_async(
-            host,
-            &["send-keys", "-l", "-t", session_name, wrapped_command],
-        )
-        .await
-        .map_err(|err| format!("send-keys -l failed: {err}"))?
-    } else {
-        remote_tmux::run_tmux_shell_status_async(
-            host,
-            &["send-keys", "-l", "-t", session_name, wrapped_command],
-        )
-        .await
-        .map_err(|err| format!("remote shell send-keys -l failed: {err}"))?
-    };
-
-    if !literal_send.success() {
-        return Err(format!("send-keys -l exited with {literal_send}"));
-    }
-
-    let enter_send =
-        remote_tmux::run_tmux_status_async(host, &["send-keys", "-t", session_name, "Enter"])
-            .await
-            .map_err(|err| format!("send-keys Enter failed: {err}"))?;
-
-    if !enter_send.success() {
-        return Err(format!("send-keys Enter exited with {enter_send}"));
-    }
-
-    Ok(())
-}
-
 async fn wait_for_completion(
-    rx: &mut broadcast::Receiver<FeEvent>,
+    client: &mut TmuxControlModeClient,
     nonce: &Nonce,
 ) -> Result<(i32, Vec<u8>), String> {
     let target_nonce = nonce.hex();
@@ -114,10 +89,10 @@ async fn wait_for_completion(
 
     tokio::time::timeout(EXECUTION_TIMEOUT, async {
         loop {
-            match rx.recv().await {
-                Ok(FeEvent::Chunk(chunk)) => {
-                    raw_output.extend_from_slice(&chunk);
-                    for event in detector.feed(&chunk) {
+            match client.read_event().await {
+                Some(TmuxEvent::Output { data, .. }) => {
+                    raw_output.extend_from_slice(&data);
+                    for event in detector.feed(&data) {
                         match event {
                             MarkerEvent::Start(found) if found.hex() == target_nonce => {}
                             MarkerEvent::End(found, exit_code) if found.hex() == target_nonce => {
@@ -127,11 +102,15 @@ async fn wait_for_completion(
                         }
                     }
                 }
-                Ok(FeEvent::Closed) => return Err("terminal stream closed".to_string()),
-                Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(broadcast::error::RecvError::Closed) => {
-                    return Err("terminal stream closed".to_string());
+                Some(TmuxEvent::Error(_, _, _, message)) => {
+                    return Err(format!("tmux error: {message}"));
                 }
+                Some(TmuxEvent::Unknown(_))
+                | Some(TmuxEvent::Begin(_, _, _))
+                | Some(TmuxEvent::End(_, _, _))
+                | Some(TmuxEvent::WindowAdd(_))
+                | Some(TmuxEvent::SessionChanged(_, _)) => continue,
+                None => return Err("terminal stream closed".to_string()),
             }
         }
     })
@@ -164,7 +143,11 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::broadcast;
+    use tokio::io::{self, AsyncWriteExt};
+
+    fn octal_escape_bytes(input: &[u8]) -> String {
+        input.iter().map(|byte| format!("\\{:03o}", byte)).collect()
+    }
 
     #[test]
     fn extract_command_output_strips_markers() {
@@ -182,20 +165,29 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_completion_detects_matching_end_marker_and_exit_code() {
-        let (sender, mut rx) = broadcast::channel(8);
         let (_, nonce) = MarkerInjector::new().inject("echo hello");
-        let chunk = format!(
-            "prefix\x1b_BEGIN_{}\x1b\\hello world\n\x1b_END_{}_7\x1b\\suffix",
-            nonce.hex(),
-            nonce.hex()
-        );
+        let mut payload = Vec::new();
+        payload.extend_from_slice(format!("\x1b_BEGIN_{}\x1b\\", nonce.hex()).as_bytes());
+        payload.extend_from_slice(b"hello world\n");
+        payload.extend_from_slice(format!("\x1b_END_{}_{}\x1b\\", nonce.hex(), 7).as_bytes());
 
-        let send_task = tokio::spawn(async move {
-            let _ = sender.send(FeEvent::Chunk(chunk.into_bytes()));
+        let line = format!("%output %0 {}\n", octal_escape_bytes(&payload));
+        let line_for_writer = line.clone();
+
+        let (client_stdin, _mock_stdin) = io::duplex(1024);
+        let (mut mock_stdout, client_stdout) = io::duplex(1024);
+        let mut client =
+            TmuxControlModeClient::from_streams(Box::new(client_stdin), Box::new(client_stdout));
+
+        let write_task = tokio::spawn(async move {
+            mock_stdout
+                .write_all(line_for_writer.as_bytes())
+                .await
+                .unwrap();
         });
 
-        let (exit_code, raw_output) = wait_for_completion(&mut rx, &nonce).await.unwrap();
-        send_task.await.unwrap();
+        let (exit_code, raw_output) = wait_for_completion(&mut client, &nonce).await.unwrap();
+        write_task.await.unwrap();
 
         assert_eq!(exit_code, 7);
         assert_eq!(

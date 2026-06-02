@@ -1,5 +1,12 @@
+use crate::remote_tmux;
 use shush_core::marker::{MarkerInjector, Nonce};
+use shush_core::tmux_event::{TmuxEvent, parse_tmux_event};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::sync::{Mutex, RwLock};
+use uuid::Uuid;
+
+use std::collections::HashMap;
+use std::sync::Arc;
 
 // ── Control-mode client ──────────────────────────────────────────────────────
 
@@ -30,8 +37,9 @@ impl TmuxControlModeClient {
 
     /// Spawn using the default `shush` socket name.
     #[allow(dead_code)]
-    pub async fn spawn(&mut self, session_name: &str) -> Result<(), String> {
-        self.spawn_with_socket(session_name, "shush").await
+    pub async fn spawn(&mut self, session_name: &str, session_host: &str) -> Result<(), String> {
+        self.spawn_with_socket(session_name, session_host, remote_tmux::TMUX_SOCKET)
+            .await
     }
 
     /// Create a tmux session and attach to it in control mode.
@@ -44,30 +52,37 @@ impl TmuxControlModeClient {
     pub async fn spawn_with_socket(
         &mut self,
         session_name: &str,
+        session_host: &str,
         socket: &str,
     ) -> Result<(), String> {
         use portable_pty::{CommandBuilder, PtySize, native_pty_system};
         use std::os::unix::io::{FromRawFd, RawFd};
 
-        // Step 1 — create the detached session.
-        let status = tokio::process::Command::new("tmux")
-            .args(["-L", socket, "new-session", "-d", "-s", session_name])
-            .stdin(std::process::Stdio::null())
-            .status()
-            .await
-            .map_err(|e| format!("failed to create tmux session: {e}"))?;
-        if !status.success() {
-            return Err(format!("tmux new-session failed with status {status}"));
-        }
+        let cmd = if remote_tmux::is_local_host(session_host) {
+            let mut cmd = CommandBuilder::new("tmux");
+            cmd.args(["-L", socket, "-CC", "attach", "-t", session_name]);
+            cmd
+        } else {
+            let mut cmd = CommandBuilder::new("ssh");
+
+            if let Ok(config) = std::env::var("SHUSH_SSH_CONFIG") {
+                if !config.is_empty() {
+                    cmd.args(["-F", &config]);
+                }
+            }
+
+            cmd.args(["-o", "BatchMode=yes"]);
+            cmd.arg("-tt");
+            cmd.arg(session_host);
+            cmd.args(["tmux", "-L", socket, "-CC", "attach", "-t", session_name]);
+            cmd
+        };
 
         // Steps 2 & 3 — open PTY and attach in control mode.
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize::default())
             .map_err(|e| format!("failed to open pty: {e}"))?;
-
-        let mut cmd = CommandBuilder::new("tmux");
-        cmd.args(["-L", socket, "-CC", "attach", "-t", session_name]);
 
         let child = pair
             .slave
@@ -121,12 +136,10 @@ impl TmuxControlModeClient {
         Ok(())
     }
 
-    /// Write a control-mode command to stdin, e.g. `send-keys -l <text>`.
-    pub async fn send_keys(&mut self, text: &str) -> Result<(), String> {
-        let cmd = format!("send-keys -l {text}\n");
+    async fn send_control_command(&mut self, command: &str) -> Result<(), String> {
         if let Some(stdin) = self.stdin.as_mut() {
             stdin
-                .write_all(cmd.as_bytes())
+                .write_all(command.as_bytes())
                 .await
                 .map_err(|e| format!("write error: {e}"))?;
             stdin
@@ -139,28 +152,60 @@ impl TmuxControlModeClient {
         }
     }
 
+    /// Write a control-mode `send-keys` command with literal text.
+    ///
+    /// This matches the previous tmux-shell behavior where command text should be sent
+    /// as raw characters, not key names.
+    pub async fn send_keys(&mut self, text: &str) -> Result<(), String> {
+        let quoted = tmux_quote_arg(text);
+        self.send_control_command(&format!("send-keys -l -- {quoted}\n"))
+            .await
+    }
+
+    /// Write a control-mode `send-keys` command for a non-literal key name.
+    pub async fn send_key(&mut self, key: &str) -> Result<(), String> {
+        self.send_control_command(&format!("send-keys {key}\n"))
+            .await
+    }
+
     #[allow(dead_code)]
     pub async fn inject_command(&mut self, command: &str) -> Result<Nonce, String> {
         let injector = MarkerInjector::new();
         let (wrapped, nonce) = injector.inject(command);
         self.send_keys(&wrapped).await?;
-        self.send_keys("Enter").await?;
+        self.send_key("Enter").await?;
         Ok(nonce)
+    }
+
+    pub async fn read_event(&mut self) -> Option<TmuxEvent> {
+        self.read_line().await.map(|line| parse_tmux_event(&line))
     }
 
     /// Read one line from the tmux event stream.  Returns `None` on EOF.
     /// Trailing whitespace (including `\r\n`) is stripped.
     pub async fn read_line(&mut self) -> Option<String> {
-        let mut line = String::new();
-        if let Some(stdout) = self.stdout.as_mut() {
-            stdout.read_line(&mut line).await.ok()?;
-            if line.is_empty() {
-                None
+        loop {
+            let mut line = String::new();
+            if let Some(stdout) = self.stdout.as_mut() {
+                match stdout.read_line(&mut line).await {
+                    Ok(0) => {
+                        self.stdout = None;
+                        return None;
+                    }
+                    Ok(_) => return Some(line.trim_end().to_string()),
+                    Err(err)
+                        if matches!(
+                            err.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                        ) =>
+                    {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    Err(_) => return None,
+                }
             } else {
-                Some(line.trim_end().to_string())
+                return None;
             }
-        } else {
-            None
         }
     }
 
@@ -173,12 +218,82 @@ impl TmuxControlModeClient {
         self.stdin = None;
         self.stdout = None;
     }
+
+    pub fn is_connected(&self) -> bool {
+        self.stdin.is_some() && self.stdout.is_some()
+    }
+
+    #[cfg(test)]
+    pub fn from_streams(
+        stdin: Box<dyn AsyncWrite + Unpin + Send>,
+        stdout: Box<dyn AsyncRead + Unpin + Send>,
+    ) -> Self {
+        Self {
+            child: None,
+            stdin: Some(stdin),
+            stdout: Some(BufReader::new(stdout)),
+            active_pane: None,
+        }
+    }
 }
 
 impl Drop for TmuxControlModeClient {
     fn drop(&mut self) {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
+        }
+    }
+}
+
+fn tmux_quote_arg(input: &str) -> String {
+    let escaped = input.replace('\'', "'\\''");
+    format!("'{escaped}'")
+}
+
+pub struct TmuxControlModeRegistry {
+    clients: RwLock<HashMap<Uuid, Arc<Mutex<TmuxControlModeClient>>>>,
+}
+
+impl TmuxControlModeRegistry {
+    pub fn new() -> Self {
+        Self {
+            clients: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub async fn get_or_spawn(
+        &self,
+        session_id: Uuid,
+        session_name: String,
+        session_host: String,
+    ) -> Result<Arc<Mutex<TmuxControlModeClient>>, String> {
+        let existing = { self.clients.read().await.get(&session_id).cloned() };
+
+        if let Some(existing) = existing {
+            if existing.lock().await.is_connected() {
+                return Ok(existing);
+            }
+
+            self.remove(session_id).await;
+        }
+
+        let mut client = TmuxControlModeClient::new();
+        client
+            .spawn(&session_name, &session_host)
+            .await
+            .map_err(|err| format!("failed to spawn control-mode client: {err}"))?;
+        let handle = Arc::new(Mutex::new(client));
+        self.clients
+            .write()
+            .await
+            .insert(session_id, Arc::clone(&handle));
+        Ok(handle)
+    }
+
+    pub async fn remove(&self, session_id: Uuid) {
+        if let Some(handle) = self.clients.write().await.remove(&session_id) {
+            let mut client = handle.lock().await;
+            client.kill().await;
         }
     }
 }
@@ -221,7 +336,10 @@ mod tests {
 
         let mut buf = vec![0u8; 64];
         let n = mock_stdin.read(&mut buf).await.unwrap();
-        assert_eq!(String::from_utf8_lossy(&buf[..n]), "send-keys -l hello\n");
+        assert_eq!(
+            String::from_utf8_lossy(&buf[..n]),
+            "send-keys -l -- 'hello'\n"
+        );
     }
 
     #[tokio::test]
@@ -236,8 +354,38 @@ mod tests {
         let n = mock_stdin.read(&mut buf).await.unwrap();
         assert_eq!(
             String::from_utf8_lossy(&buf[..n]),
-            "send-keys -l ls -la | grep foo\n"
+            "send-keys -l -- 'ls -la | grep foo'\n"
         );
+    }
+
+    #[tokio::test]
+    async fn send_keys_quotes_tmux_argument() {
+        let (client_stdin, mut mock_stdin) = io::duplex(1024);
+        let (_mock_stdout, client_stdout) = io::duplex(1024);
+        let mut client = mock_client(Box::new(client_stdin), Box::new(client_stdout));
+
+        client.send_keys("printf 'a' \\033\\n").await.unwrap();
+
+        let mut buf = vec![0u8; 128];
+        let n = mock_stdin.read(&mut buf).await.unwrap();
+        let expected = format!(
+            "send-keys -l -- {}\n",
+            tmux_quote_arg("printf 'a' \\033\\n")
+        );
+        assert_eq!(String::from_utf8_lossy(&buf[..n]), expected);
+    }
+
+    #[tokio::test]
+    async fn send_key_writes_named_key() {
+        let (client_stdin, mut mock_stdin) = io::duplex(1024);
+        let (_mock_stdout, client_stdout) = io::duplex(1024);
+        let mut client = mock_client(Box::new(client_stdin), Box::new(client_stdout));
+
+        client.send_key("Enter").await.unwrap();
+
+        let mut buf = vec![0u8; 64];
+        let n = mock_stdin.read(&mut buf).await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&buf[..n]), "send-keys Enter\n");
     }
 
     #[tokio::test]
@@ -342,7 +490,7 @@ mod tests {
         let n = mock_stdin.read(&mut buf).await.unwrap();
         assert_eq!(
             String::from_utf8_lossy(&buf[..n]),
-            "send-keys -l echo hello\n"
+            "send-keys -l -- 'echo hello'\n"
         );
 
         mock_stdout.write_all(b"%output %1 hello\n").await.unwrap();
@@ -430,7 +578,9 @@ mod integration_tests {
         let _guard = TmuxTestGuard::new(&socket);
 
         let mut cc = TmuxControlModeClient::new();
-        cc.spawn_with_socket(&name, &socket).await.unwrap();
+        cc.spawn_with_socket(&name, "localhost", &socket)
+            .await
+            .unwrap();
 
         let sessions = tmux_list(&socket);
         assert!(
@@ -449,7 +599,9 @@ mod integration_tests {
         let _guard = TmuxTestGuard::new(&socket);
 
         let mut cc = TmuxControlModeClient::new();
-        cc.spawn_with_socket(&name, &socket).await.unwrap();
+        cc.spawn_with_socket(&name, "localhost", &socket)
+            .await
+            .unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
@@ -472,7 +624,9 @@ mod integration_tests {
         let _guard = TmuxTestGuard::new(&socket);
 
         let mut cc = TmuxControlModeClient::new();
-        cc.spawn_with_socket(&name, &socket).await.unwrap();
+        cc.spawn_with_socket(&name, "localhost", &socket)
+            .await
+            .unwrap();
 
         // Drain greeting until %session-changed or timeout.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(500);
@@ -490,10 +644,7 @@ mod integration_tests {
 
         cc.send_keys("echo shush_marker_99").await.unwrap();
         // Send an Enter key via control-mode command.
-        if let Some(stdin) = cc.stdin.as_mut() {
-            stdin.write_all(b"send-keys Enter\n").await.unwrap();
-            stdin.flush().await.unwrap();
-        }
+        cc.send_key("Enter").await.unwrap();
 
         // Drain events looking for the marker.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
@@ -528,7 +679,9 @@ mod integration_tests {
         let _guard = TmuxTestGuard::new(&socket);
 
         let mut cc = TmuxControlModeClient::new();
-        cc.spawn_with_socket(&name, &socket).await.unwrap();
+        cc.spawn_with_socket(&name, "localhost", &socket)
+            .await
+            .unwrap();
         cc.kill().await;
 
         assert!(cc.stdin.is_none());

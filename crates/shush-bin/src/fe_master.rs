@@ -19,6 +19,9 @@ const FE_BROADCAST_CAPACITY: usize = 512;
 const FE_REPLAY_BUFFER_MAX_BYTES: usize = 128 * 1024;
 const MARKER_ECHO_PREFIX: &[u8] = b"printf '\\033_BEGIN_";
 const MARKER_ECHO_SUFFIX: &[u8] = b"; unset __shush_exit";
+const MARKER_ECHO_MIDDLE: &[u8] = b"\\033\\\\'; ";
+const MARKER_ECHO_END_PREFIX: &[u8] = b"; __shush_exit=$?; printf '\\033_END_";
+const MARKER_ECHO_END_SUFFIX: &[u8] = b"_%s\\033\\\\' \"$__shush_exit\"; unset __shush_exit";
 
 #[derive(Clone, Debug)]
 pub enum FeEvent {
@@ -30,9 +33,25 @@ pub enum FeEvent {
 struct MarkerEchoFilter {
     pending: Vec<u8>,
     stripping: bool,
+    replacement: Option<Vec<u8>>,
+}
+
+#[derive(Default)]
+struct MarkerSequenceFilter {
+    pending: Vec<u8>,
+}
+
+#[derive(Default)]
+struct TerminalOutputFilter {
+    echo: MarkerEchoFilter,
+    markers: MarkerSequenceFilter,
 }
 
 impl MarkerEchoFilter {
+    fn queue_replacement(&mut self, command: &[u8]) {
+        self.replacement = Some(command.to_vec());
+    }
+
     fn filter_chunk(&mut self, chunk: &[u8]) -> Vec<u8> {
         self.pending.extend_from_slice(chunk);
         let mut output = Vec::new();
@@ -47,11 +66,16 @@ impl MarkerEchoFilter {
                         {
                             drain_end += 1;
                         }
+                        if let Some(replacement) = self.replacement.take() {
+                            output.extend_from_slice(&replacement);
+                            output.extend_from_slice(
+                                &self.pending[index + MARKER_ECHO_SUFFIX.len()..drain_end],
+                            );
+                        }
                         self.pending.drain(..drain_end);
                         self.stripping = false;
                     }
                     None => {
-                        self.pending.clear();
                         break;
                     }
                 }
@@ -78,7 +102,7 @@ impl MarkerEchoFilter {
         output
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    fn finish(&mut self) -> Vec<u8> {
         if self.stripping {
             Vec::new()
         } else {
@@ -87,10 +111,144 @@ impl MarkerEchoFilter {
     }
 }
 
+impl MarkerSequenceFilter {
+    fn filter_chunk(&mut self, chunk: &[u8]) -> Vec<u8> {
+        const MARKER_START_PREFIX: &[u8] = b"\x1b_BEGIN_";
+        const MARKER_END_PREFIX: &[u8] = b"\x1b_END_";
+        const MARKER_TERMINATOR: &[u8] = b"\x1b\\";
+        const PREFIX_KEEP: usize = MARKER_START_PREFIX.len() - 1;
+
+        self.pending.extend_from_slice(chunk);
+        let mut output = Vec::new();
+
+        loop {
+            let start = find_subsequence(&self.pending, MARKER_START_PREFIX)
+                .into_iter()
+                .chain(find_subsequence(&self.pending, MARKER_END_PREFIX))
+                .min();
+
+            match start {
+                Some(index) => {
+                    output.extend_from_slice(&self.pending[..index]);
+                    match find_subsequence(&self.pending[index + 1..], MARKER_TERMINATOR) {
+                        Some(relative_end) => {
+                            let consumed = index + 1 + relative_end + MARKER_TERMINATOR.len();
+                            self.pending.drain(..consumed);
+                        }
+                        None => {
+                            self.pending.drain(..index);
+                            break;
+                        }
+                    }
+                }
+                None => {
+                    if self.pending.len() > PREFIX_KEEP {
+                        let emit_len = self.pending.len() - PREFIX_KEEP;
+                        output.extend_from_slice(&self.pending[..emit_len]);
+                        self.pending.drain(..emit_len);
+                    }
+                    break;
+                }
+            }
+        }
+
+        output
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending)
+    }
+}
+
+impl TerminalOutputFilter {
+    fn queue_replacement(&mut self, command: &[u8]) {
+        self.echo.queue_replacement(command);
+    }
+
+    fn filter_chunk(&mut self, chunk: &[u8]) -> Vec<u8> {
+        let echoed = self.echo.filter_chunk(chunk);
+        self.markers.filter_chunk(&echoed)
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        let echoed = self.echo.finish();
+        let mut output = self.markers.filter_chunk(&echoed);
+        output.extend(self.markers.finish());
+        output
+    }
+}
+
+fn extract_wrapped_command(bytes: &[u8]) -> Option<(Vec<u8>, usize, Vec<u8>)> {
+    let prefix_end = MARKER_ECHO_PREFIX.len();
+    let nonce_end = prefix_end + 64;
+    if bytes.len() < nonce_end {
+        return None;
+    }
+    if !bytes[prefix_end..nonce_end]
+        .iter()
+        .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+
+    let middle_index = find_subsequence(&bytes[nonce_end..], MARKER_ECHO_MIDDLE)? + nonce_end;
+    let command_start = middle_index + MARKER_ECHO_MIDDLE.len();
+    let end_prefix_index =
+        find_subsequence(&bytes[command_start..], MARKER_ECHO_END_PREFIX)? + command_start;
+    let command = bytes[command_start..end_prefix_index].to_vec();
+
+    let end_nonce_start = end_prefix_index + MARKER_ECHO_END_PREFIX.len();
+    let end_nonce_end = end_nonce_start + 64;
+    if bytes.len() < end_nonce_end {
+        return None;
+    }
+    if !bytes[end_nonce_start..end_nonce_end]
+        .iter()
+        .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+
+    if !bytes[end_nonce_start..end_nonce_end].eq(&bytes[prefix_end..nonce_end]) {
+        return None;
+    }
+
+    let suffix_start = end_nonce_end;
+    let suffix_end = suffix_start + MARKER_ECHO_END_SUFFIX.len();
+    if bytes.len() < suffix_end || bytes[suffix_start..suffix_end] != *MARKER_ECHO_END_SUFFIX {
+        return None;
+    }
+
+    let mut consumed = suffix_end;
+    while consumed < bytes.len() && matches!(bytes[consumed], b'\r' | b'\n') {
+        consumed += 1;
+    }
+
+    Some((command, consumed, bytes[suffix_end..consumed].to_vec()))
+}
+
 fn sanitize_marker_echoes(bytes: &[u8]) -> Vec<u8> {
-    let mut filter = MarkerEchoFilter::default();
-    let mut output = filter.filter_chunk(bytes);
-    output.extend(filter.finish());
+    let mut output = Vec::new();
+    let mut cursor = 0;
+
+    while let Some(index) = find_subsequence(&bytes[cursor..], MARKER_ECHO_PREFIX) {
+        let start = cursor + index;
+        output.extend_from_slice(&bytes[cursor..start]);
+
+        if let Some((command, consumed, trailing_newlines)) =
+            extract_wrapped_command(&bytes[start..])
+        {
+            output.extend_from_slice(&command);
+            output.extend_from_slice(&trailing_newlines);
+            cursor = start + consumed;
+        } else {
+            output.extend_from_slice(&bytes[start..]);
+            cursor = bytes.len();
+            break;
+        }
+    }
+
+    output.extend_from_slice(&bytes[cursor..]);
     output
 }
 
@@ -120,7 +278,7 @@ pub struct FeMasterHandle {
 
     // Ring buffer that accumulates raw PTY bytes as they arrive.
     replay_buffer: tokio::sync::Mutex<Vec<u8>>,
-    echo_filter: tokio::sync::Mutex<MarkerEchoFilter>,
+    output_filter: tokio::sync::Mutex<TerminalOutputFilter>,
 
     viewers: AtomicUsize,
     idle_task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
@@ -250,7 +408,7 @@ impl FeMasterHandle {
             master_guard: tokio::sync::Mutex::new(Some(master_guard)),
             reader_task: tokio::sync::Mutex::new(None),
             replay_buffer: tokio::sync::Mutex::new(Vec::new()),
-            echo_filter: tokio::sync::Mutex::new(MarkerEchoFilter::default()),
+            output_filter: tokio::sync::Mutex::new(TerminalOutputFilter::default()),
             viewers: AtomicUsize::new(0),
             idle_task: tokio::sync::Mutex::new(None),
             alive: AtomicBool::new(true),
@@ -266,6 +424,20 @@ impl FeMasterHandle {
             loop {
                 match reader.read(&mut buf).await {
                     Ok(0) => {
+                        let trailing = {
+                            let mut filter = reader_handle.output_filter.lock().await;
+                            filter.finish()
+                        };
+                        if !trailing.is_empty() {
+                            let mut replay = reader_handle.replay_buffer.lock().await;
+                            replay.extend_from_slice(&trailing);
+                            if replay.len() > FE_REPLAY_BUFFER_MAX_BYTES {
+                                let excess = replay.len() - FE_REPLAY_BUFFER_MAX_BYTES;
+                                replay.drain(..excess);
+                            }
+                            drop(replay);
+                            let _ = reader_sender.send(FeEvent::Chunk(trailing));
+                        }
                         warn!(session_host = %reader_session_host, session_name = %reader_session_name, "FE reader reached EOF");
                         reader_handle.alive.store(false, Ordering::SeqCst);
                         let _ = reader_sender.send(FeEvent::Closed);
@@ -273,7 +445,7 @@ impl FeMasterHandle {
                     }
                     Ok(n) => {
                         let filtered = {
-                            let mut filter = reader_handle.echo_filter.lock().await;
+                            let mut filter = reader_handle.output_filter.lock().await;
                             filter.filter_chunk(&buf[..n])
                         };
                         if filtered.is_empty() {
@@ -339,6 +511,11 @@ impl FeMasterHandle {
 
     pub async fn replay_bytes(&self) -> Vec<u8> {
         self.replay_buffer.lock().await.clone()
+    }
+
+    async fn queue_command_echo_replacement(&self, command: &[u8]) {
+        let mut filter = self.output_filter.lock().await;
+        filter.queue_replacement(command);
     }
 
     fn is_alive(&self) -> bool {
@@ -465,6 +642,21 @@ impl FeMasterRegistry {
 
         *handle.idle_task.lock().await = Some(task);
     }
+
+    pub async fn queue_command_echo_replacement(
+        self: &Arc<Self>,
+        session_id: Uuid,
+        command: &[u8],
+    ) {
+        let maybe = {
+            let guard = self.masters.read().unwrap();
+            guard.get(&session_id).cloned()
+        };
+
+        if let Some(handle) = maybe {
+            handle.queue_command_echo_replacement(command).await;
+        }
+    }
 }
 
 pub fn encode_terminal_chunk(data: &[u8]) -> String {
@@ -482,17 +674,21 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_marker_echoes_removes_wrapped_command_from_snapshot() {
+    fn sanitize_marker_echoes_preserves_user_command_from_snapshot() {
         let raw = b"before\nprintf '\\033_BEGIN_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\\033\\\\'; echo hello; __shush_exit=$?; printf '\\033_END_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef_%s\\033\\\\' \"$__shush_exit\"; unset __shush_exit\nafter\n";
 
         let filtered = sanitize_marker_echoes(raw);
 
-        assert_eq!(String::from_utf8_lossy(&filtered), "before\nafter\n");
+        assert_eq!(
+            String::from_utf8_lossy(&filtered),
+            "before\necho hello\nafter\n"
+        );
     }
 
     #[test]
     fn marker_echo_filter_handles_chunk_boundaries() {
         let mut filter = MarkerEchoFilter::default();
+        filter.queue_replacement(b"echo hello");
         let chunk1 = b"before\nprintf '\\033_BEGIN_deadbeefdeadbeef";
         let chunk2 = b"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\\033\\\\'; echo hello; __shush_exit=$?; printf '\\033_END_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef_%s\\033\\\\' \"$__shush_exit\"; unset __shush_exit\nafter\n";
 
@@ -500,6 +696,20 @@ mod tests {
         filtered.extend(filter.filter_chunk(chunk2));
         filtered.extend(filter.finish());
 
-        assert_eq!(String::from_utf8_lossy(&filtered), "before\nafter\n");
+        assert_eq!(
+            String::from_utf8_lossy(&filtered),
+            "before\necho hello\nafter\n"
+        );
+    }
+
+    #[test]
+    fn terminal_output_filter_removes_apc_markers() {
+        let mut filter = TerminalOutputFilter::default();
+        let raw = b"before\x1b_BEGIN_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\x1b\\hello\x1b_END_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef_0\x1b\\after";
+
+        let mut filtered = filter.filter_chunk(raw);
+        filtered.extend(filter.finish());
+
+        assert_eq!(String::from_utf8_lossy(&filtered), "beforehelloafter");
     }
 }

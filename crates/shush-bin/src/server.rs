@@ -3,6 +3,7 @@ use crate::{
     fe_master,
     fe_master::FeMasterRegistry,
     session_manager::{SessionCommandError, SessionManager},
+    tmux_control::TmuxControlModeRegistry,
 };
 use axum::{
     Router,
@@ -52,10 +53,12 @@ struct ListCommandsQuery {
 pub fn create_app(session_manager: SessionManager) -> Router {
     let session_manager = Arc::new(session_manager);
     let fe_masters = Arc::new(FeMasterRegistry::new());
+    let control_mode = Arc::new(TmuxControlModeRegistry::new());
     let state = AppState {
         command_executor: Arc::new(CommandExecutor::new(
             Arc::clone(&session_manager),
             Arc::clone(&fe_masters),
+            Arc::clone(&control_mode),
         )),
         session_manager,
         fe_masters,

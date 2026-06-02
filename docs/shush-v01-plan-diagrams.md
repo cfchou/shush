@@ -52,10 +52,10 @@ classDiagram
     }
 
     class TmuxControlModeClient {
-        +spawn(session_name) Result~Self~
+        +spawn(session_name, session_host) Result~Self~
         +send_keys(text) Result
         +inject_command(command) Result~Nonce~
-        +read_line() Option~String~
+        +read_event() Option~TmuxEvent~
         +kill()
     }
 
@@ -105,6 +105,7 @@ classDiagram
         +spawn(name, host) Arc~Self~
         +snapshot() String
         +subscribe() Receiver~FeEvent~
+        +queue_command_echo_replacement(command)
         +replay_bytes() Vec~u8~
         +viewer_count() usize
         +is_alive() bool
@@ -113,6 +114,7 @@ classDiagram
     class FeMasterRegistry {
         +get_or_spawn(id, name, host) Arc~FeMasterHandle~
         +on_disconnect(id)
+        +queue_command_echo_replacement(id, command)
     }
 
     Session "1" *-- "0..1" CommandCard : current_command
@@ -178,6 +180,8 @@ sequenceDiagram
     deactivate TCC
 
     User->>Client: sees exit code + output
+
+    Note over SS,Client: Browser FE stream is rendering-only.<br/>Marker completion comes from control-mode `%output`.<br/>Backend FE filter rewrites wrapped command echo in-place before xterm renders it.
 ```
 
 ---

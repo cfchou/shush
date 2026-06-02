@@ -114,11 +114,11 @@ Move command completion detection off the FE stream and onto a persistent tmux c
 
 ## Acceptance criteria
 
-- [ ] Remote submit + approve of `echo hello` reaches `Completed(0)` and session returns to `IDLE`
-- [ ] Browser monitor shows `echo hello` and `hello` without marker garbage
-- [ ] Marker detection uses tmux control-mode `%output`, not FE stream bytes
-- [ ] Remote monitor Playwright regression test passes with `SHUSH_E2E_REMOTE=1 SHUSH_E2E_ASSERT_STREAM=1`
-- [ ] `cargo test` passes
+- [x] Remote submit + approve of `echo hello` reaches `Completed(0)` and session returns to `IDLE`
+- [x] Browser monitor shows `echo hello` and `hello` without marker garbage
+- [x] Marker detection uses tmux control-mode `%output`, not FE stream bytes
+- [x] Remote monitor Playwright regression test passes with `SHUSH_E2E_REMOTE=1 SHUSH_E2E_ASSERT_STREAM=1`
+- [x] `cargo test` passes
 
 ## Temporary Investigation Changes To Revisit
 

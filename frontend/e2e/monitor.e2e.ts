@@ -221,6 +221,25 @@ test.describe("remote monitor coverage", () => {
         .poll(async () => await terminalText(page), { timeout: 35_000 })
         .toContain("hello");
 
+      await expect
+        .poll(async () => {
+          const rows = await terminalRows(page);
+          const commandRow = rows.findIndex((row) => row.includes("echo hello"));
+          const outputRow = rows.findIndex((row) => row.trim() === "hello");
+          const nextPromptRow = rows.findIndex(
+            (row, index) => index > outputRow && row.includes("shush@") && row.includes(":~$"),
+          );
+          const statusRow = rows.find((row) => row.includes("0:bash*")) ?? "";
+
+          return (
+            commandRow >= 0 &&
+            outputRow > commandRow &&
+            nextPromptRow > outputRow &&
+            !statusRow.includes("echo hello")
+          );
+        }, { timeout: 35_000 })
+        .toBe(true);
+
       const after = await terminalText(page);
       await page.screenshot({ path: test.info().outputPath("after-approve-flow.png") });
 
@@ -518,10 +537,14 @@ async function wsEventsContain(
 }
 
 async function terminalText(page: import("@playwright/test").Page): Promise<string> {
+  const rows = await terminalRows(page);
+  return rows.join("\n");
+}
+
+async function terminalRows(page: import("@playwright/test").Page): Promise<string[]> {
   return await page.evaluate(() => {
     const rowEls = Array.from(document.querySelectorAll(".xterm-rows > div")) as HTMLDivElement[];
-    const rows = rowEls.map((el) => el.textContent ?? "");
-    return rows.join("\n");
+    return rowEls.map((el) => el.textContent ?? "");
   });
 }
 
