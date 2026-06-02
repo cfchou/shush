@@ -261,6 +261,17 @@ impl TmuxControlModeRegistry {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) async fn insert_client_for_test(&self, session_id: Uuid) {
+        let handle = Arc::new(Mutex::new(TmuxControlModeClient::new()));
+        self.clients.write().await.insert(session_id, handle);
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn has_client(&self, session_id: Uuid) -> bool {
+        self.clients.read().await.contains_key(&session_id)
+    }
+
     pub async fn get_or_spawn(
         &self,
         session_id: Uuid,

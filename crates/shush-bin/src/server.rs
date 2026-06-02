@@ -27,6 +27,7 @@ pub struct AppState {
     pub session_manager: Arc<SessionManager>,
     pub fe_masters: Arc<FeMasterRegistry>,
     pub command_executor: Arc<CommandExecutor>,
+    pub control_mode: Arc<TmuxControlModeRegistry>,
 }
 
 #[derive(Deserialize)]
@@ -51,9 +52,16 @@ struct ListCommandsQuery {
 }
 
 pub fn create_app(session_manager: SessionManager) -> Router {
+    let control_mode = Arc::new(TmuxControlModeRegistry::new());
+    create_app_with_control_mode(session_manager, control_mode)
+}
+
+pub(crate) fn create_app_with_control_mode(
+    session_manager: SessionManager,
+    control_mode: Arc<TmuxControlModeRegistry>,
+) -> Router {
     let session_manager = Arc::new(session_manager);
     let fe_masters = Arc::new(FeMasterRegistry::new());
-    let control_mode = Arc::new(TmuxControlModeRegistry::new());
     let state = AppState {
         command_executor: Arc::new(CommandExecutor::new(
             Arc::clone(&session_manager),
@@ -62,6 +70,7 @@ pub fn create_app(session_manager: SessionManager) -> Router {
         )),
         session_manager,
         fe_masters,
+        control_mode,
     };
 
     let api = Router::new()
@@ -111,6 +120,7 @@ async fn get_session(
 
 async fn delete_session(State(state): State<AppState>, Path(id): Path<Uuid>) -> StatusCode {
     if state.session_manager.delete(id) {
+        state.control_mode.remove(id).await;
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
@@ -357,6 +367,7 @@ async fn run_command_execution(state: AppState, session_id: Uuid) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::{env, path::Path};
 
     use axum::{
@@ -370,6 +381,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::session_manager::SessionManager;
+    use crate::tmux_control::TmuxControlModeRegistry;
 
     struct RemoteTestEnv {
         host: String,
@@ -554,6 +566,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delete_session_removes_control_mode_client() {
+        let mgr = SessionManager::new();
+        let control_mode = Arc::new(TmuxControlModeRegistry::new());
+        let app = super::create_app_with_control_mode(mgr, control_mode.clone());
+
+        let create_resp = app
+            .clone()
+            .oneshot(
+                Request::post("/api/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"del-cleanup","host":""}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(create_resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let created: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+        control_mode.insert_client_for_test(id).await;
+        assert!(control_mode.has_client(id).await);
+
+        let delete_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::DELETE)
+                    .uri(format!("/api/sessions/{}", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete_resp.status(), StatusCode::NO_CONTENT);
+        assert!(!control_mode.has_client(id).await);
+    }
+
+    #[tokio::test]
     async fn delete_missing_returns_not_found() {
         let mgr = SessionManager::new();
         let app = super::create_app(mgr);
@@ -568,6 +620,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_missing_session_does_not_clean_control_mode() {
+        let mgr = SessionManager::new();
+        let control_mode = Arc::new(TmuxControlModeRegistry::new());
+        let app = super::create_app_with_control_mode(mgr, control_mode.clone());
+        let id = Uuid::new_v4();
+
+        control_mode.insert_client_for_test(id).await;
+        assert!(control_mode.has_client(id).await);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::DELETE)
+                    .uri(format!("/api/sessions/{}", id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(control_mode.has_client(id).await);
     }
 
     #[tokio::test]
