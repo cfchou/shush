@@ -271,6 +271,14 @@ impl TmuxControlModeRegistry {
         self.clients.read().await.contains_key(&session_id)
     }
 
+    #[cfg(test)]
+    pub(crate) async fn client_for_test(
+        &self,
+        session_id: Uuid,
+    ) -> Option<Arc<Mutex<TmuxControlModeClient>>> {
+        self.clients.read().await.get(&session_id).cloned()
+    }
+
     pub async fn get_or_spawn(
         &self,
         session_id: Uuid,
@@ -301,7 +309,9 @@ impl TmuxControlModeRegistry {
     }
 
     pub async fn remove(&self, session_id: Uuid) {
-        if let Some(handle) = self.clients.write().await.remove(&session_id) {
+        let handle = self.clients.write().await.remove(&session_id);
+
+        if let Some(handle) = handle {
             let mut client = handle.lock().await;
             client.kill().await;
         }
@@ -508,6 +518,35 @@ mod tests {
             client.read_line().await.as_deref(),
             Some("%output %1 hello")
         );
+    }
+
+    #[tokio::test]
+    async fn remove_does_not_block_other_registry_operations_while_waiting_on_client_lock() {
+        let registry = Arc::new(TmuxControlModeRegistry::new());
+        let blocked_session = Uuid::new_v4();
+        let other_session = Uuid::new_v4();
+
+        registry.insert_client_for_test(blocked_session).await;
+        let handle = registry.client_for_test(blocked_session).await.unwrap();
+        let _client_guard = handle.lock().await;
+
+        let remove_registry = Arc::clone(&registry);
+        let remove_task = tokio::spawn(async move {
+            remove_registry.remove(blocked_session).await;
+        });
+
+        tokio::task::yield_now().await;
+
+        tokio::time::timeout(std::time::Duration::from_millis(100), async {
+            registry.insert_client_for_test(other_session).await;
+        })
+        .await
+        .expect("remove should not hold registry lock while waiting on client lock");
+
+        assert!(registry.has_client(other_session).await);
+
+        drop(_client_guard);
+        remove_task.await.unwrap();
     }
 }
 
