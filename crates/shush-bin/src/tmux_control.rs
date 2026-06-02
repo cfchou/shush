@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 // ── Control-mode client ──────────────────────────────────────────────────────
 
@@ -192,7 +193,14 @@ impl TmuxControlModeClient {
                         return None;
                     }
                     Ok(_) => return Some(line.trim_end().to_string()),
-                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(err)
+                        if matches!(
+                            err.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                        ) =>
+                    {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
                     Err(_) => return None,
                 }
             } else {
@@ -325,6 +333,12 @@ mod tests {
 
     struct WouldBlockReader;
 
+    struct WouldBlockThenDataReader {
+        emitted_would_block: bool,
+        data: Vec<u8>,
+        cursor: usize,
+    }
+
     impl AsyncRead for WouldBlockReader {
         fn poll_read(
             self: Pin<&mut Self>,
@@ -332,6 +346,29 @@ mod tests {
             _buf: &mut ReadBuf<'_>,
         ) -> Poll<std::io::Result<()>> {
             Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)))
+        }
+    }
+
+    impl AsyncRead for WouldBlockThenDataReader {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            if !self.emitted_would_block {
+                self.emitted_would_block = true;
+                return Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)));
+            }
+
+            if self.cursor >= self.data.len() {
+                return Poll::Ready(Ok(()));
+            }
+
+            let remaining = &self.data[self.cursor..];
+            let len = remaining.len().min(buf.remaining());
+            buf.put_slice(&remaining[..len]);
+            self.cursor += len;
+            Poll::Ready(Ok(()))
         }
     }
 
@@ -490,11 +527,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn read_line_returns_none_on_would_block() {
+    async fn read_line_retries_on_would_block_until_data_arrives() {
+        let (client_stdin, _) = io::duplex(1024);
+        let reader = WouldBlockThenDataReader {
+            emitted_would_block: false,
+            data: b"%begin 123 456 7\n".to_vec(),
+            cursor: 0,
+        };
+        let mut client = mock_client(Box::new(client_stdin), Box::new(reader));
+
+        assert_eq!(
+            client.read_line().await.as_deref(),
+            Some("%begin 123 456 7")
+        );
+    }
+
+    #[tokio::test]
+    async fn read_line_returns_none_on_persistent_would_block() {
         let (client_stdin, _) = io::duplex(1024);
         let mut client = mock_client(Box::new(client_stdin), Box::new(WouldBlockReader));
 
-        assert!(client.read_line().await.is_none());
+        let result = tokio::time::timeout(Duration::from_millis(50), client.read_line()).await;
+
+        assert!(result.is_err());
     }
 
     #[tokio::test]

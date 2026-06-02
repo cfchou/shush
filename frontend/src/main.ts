@@ -10,7 +10,10 @@ const monitorMatch = path.match(/^\/monitor(?:\/([^/]+))?\/?$/);
 if (path === "/") {
   renderMonitor(app);
 } else if (monitorMatch) {
-  renderMonitor(app, monitorMatch[1] ? decodeURIComponent(monitorMatch[1]) : undefined);
+  renderMonitor(
+    app,
+    monitorMatch[1] ? decodeURIComponent(monitorMatch[1]) : undefined,
+  );
 } else {
   renderDashboard(app);
 }

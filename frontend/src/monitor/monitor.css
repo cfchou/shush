@@ -11,12 +11,15 @@
   --monitor-info-blue: #428bff;
   --monitor-luxe-purple: #460479;
 
-  --monitor-font-system: Circular, -apple-system, system-ui, Roboto, "Helvetica Neue", sans-serif;
-  --monitor-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --monitor-font-system: Circular, -apple-system, system-ui, Roboto,
+    "Helvetica Neue", sans-serif;
+  --monitor-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    monospace;
 
-  --monitor-shadow-elevation: rgba(0, 0, 0, 0.02) 0 0 0 1px, rgba(0, 0, 0, 0.04) 0 2px 6px 0,
-    rgba(0, 0, 0, 0.1) 0 4px 8px 0;
-  --monitor-shadow-hover: rgba(0, 0, 0, 0.04) 0 4px 12px, rgba(0, 0, 0, 0.08) 0 8px 24px;
+  --monitor-shadow-elevation: rgba(0, 0, 0, 0.02) 0 0 0 1px, rgba(0, 0, 0, 0.04)
+    0 2px 6px 0, rgba(0, 0, 0, 0.1) 0 4px 8px 0;
+  --monitor-shadow-hover: rgba(0, 0, 0, 0.04) 0 4px 12px, rgba(0, 0, 0, 0.08) 0
+    8px 24px;
 }
 
 * {
@@ -31,8 +34,7 @@
       1200px 500px at 80% -10%,
       #eef2f8 0%,
       transparent 60%
-    ),
-    #dce2ec;
+    ), #dce2ec;
   font-family: var(--monitor-font-system);
 }
 

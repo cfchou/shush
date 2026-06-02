@@ -1,11 +1,11 @@
 import "./monitor.css";
+import { getSession, listSessions } from "../api";
+import type { Session } from "../types";
 import {
   decodeBase64Bytes,
   normalizeLineEndings,
   reconnectDelayMs,
 } from "./stream_utils";
-import { getSession, listSessions } from "../api";
-import type { Session } from "../types";
 import { TerminalView } from "./terminal";
 
 type StreamMessage =
@@ -216,9 +216,15 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
   const sessionListEl = queryRequired<HTMLElement>("#monitor-session-list");
   const sessionTitle = queryRequired<HTMLElement>("#monitor-title");
   const sessionIdEl = queryRequired<HTMLElement>("#session-id");
-  const sessionStateCaption = queryRequired<HTMLElement>("#monitor-state-caption");
-  const leftBadgeBanner = queryRequired<HTMLElement>("#monitor-left-badge-banner");
-  const rightBadgeBanner = queryRequired<HTMLElement>("#monitor-right-badge-banner");
+  const sessionStateCaption = queryRequired<HTMLElement>(
+    "#monitor-state-caption",
+  );
+  const leftBadgeBanner = queryRequired<HTMLElement>(
+    "#monitor-left-badge-banner",
+  );
+  const rightBadgeBanner = queryRequired<HTMLElement>(
+    "#monitor-right-badge-banner",
+  );
   const terminalTitleEl = queryRequired<HTMLElement>("#terminal-title");
   const terminalStateEl = queryRequired<HTMLElement>("#terminal-state");
   const yoloControl = queryRequired<HTMLElement>("#yolo-control");
@@ -234,7 +240,10 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
   function relativeTimeFromNow(value: string): string {
     const valueDate = new Date(value);
     if (Number.isNaN(valueDate.getTime())) return "unknown";
-    const seconds = Math.max(0, Math.floor((Date.now() - valueDate.getTime()) / 1000));
+    const seconds = Math.max(
+      0,
+      Math.floor((Date.now() - valueDate.getTime()) / 1000),
+    );
     if (seconds < 60) return "just now";
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
@@ -245,8 +254,7 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
     const selected = state.selectedSession;
     if (selected) {
       sessionTitle.textContent = selected.name;
-      sessionStateCaption.textContent =
-        `${selected.host || "local"} · State ${selected.state}`;
+      sessionStateCaption.textContent = `${selected.host || "local"} · State ${selected.state}`;
       sessionIdEl.textContent = `Session: ${selected.id}`;
       terminalTitleEl.textContent = `bash - ${selected.name}`;
       terminalStateEl.textContent = selected.state.toUpperCase();
@@ -264,7 +272,9 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
 
   function renderYoloState(): void {
     yoloSwitch.classList.toggle("is-on", state.yoloEnabled);
-    yoloLabel.textContent = state.yoloEnabled ? "YOLO Mode Active" : "YOLO Mode Off";
+    yoloLabel.textContent = state.yoloEnabled
+      ? "YOLO Mode Active"
+      : "YOLO Mode Off";
     yoloLabel.classList.toggle("is-on", state.yoloEnabled);
   }
 
@@ -322,18 +332,24 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
       .map((card) => renderCommandCard(card))
       .join("");
 
-    commandList.querySelectorAll(".monitor-command-card").forEach((cardEl) => {
-      const summary = cardEl.querySelector<HTMLElement>(".monitor-card-summary");
+    for (const cardEl of commandList.querySelectorAll(
+      ".monitor-command-card",
+    )) {
+      const summary = cardEl.querySelector<HTMLElement>(
+        ".monitor-card-summary",
+      );
       summary?.addEventListener("click", () => {
         const currentlyExpanded = cardEl.classList.contains("is-expanded");
-        commandList
-          .querySelectorAll(".monitor-command-card")
-          .forEach((other) => other.classList.remove("is-expanded"));
+        for (const other of commandList.querySelectorAll(
+          ".monitor-command-card",
+        )) {
+          other.classList.remove("is-expanded");
+        }
         if (!currentlyExpanded) {
           cardEl.classList.add("is-expanded");
         }
       });
-    });
+    }
   }
 
   function renderCommandCard(card: CommandCardScaffold): string {
@@ -361,7 +377,8 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
   function updateShellShell(): void {
     const width = window.innerWidth;
     const shouldHideLeft = width < AUTO_HIDE_LEFT_PX && !state.leftPinnedOpen;
-    const shouldHideRight = width < AUTO_HIDE_RIGHT_PX && !state.rightPinnedOpen;
+    const shouldHideRight =
+      width < AUTO_HIDE_RIGHT_PX && !state.rightPinnedOpen;
 
     const leftHidden = shouldHideLeft || state.leftCollapsed;
     const rightHidden = shouldHideRight || state.rightCollapsed;
@@ -373,8 +390,10 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
 
     captionBadges[0]!.dataset.visible = String(leftHidden);
     captionBadges[1]!.dataset.visible = String(rightHidden);
-    captionBadges[0]!.textContent = "Left sidebar hidden to preserve terminal space.";
-    captionBadges[1]!.textContent = "Right sidebar hidden to preserve terminal space.";
+    captionBadges[0]!.textContent =
+      "Left sidebar hidden to preserve terminal space.";
+    captionBadges[1]!.textContent =
+      "Right sidebar hidden to preserve terminal space.";
   }
 
   function toggleLeftSidebar(): void {
@@ -440,7 +459,11 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
     );
     activeWs = ws;
 
-    setStatus(attempt === 0 ? "Connecting..." : `Reconnecting (attempt ${attempt + 1})...`);
+    setStatus(
+      attempt === 0
+        ? "Connecting..."
+        : `Reconnecting (attempt ${attempt + 1})...`,
+    );
 
     ws.addEventListener("open", () => {
       attempt = 0;

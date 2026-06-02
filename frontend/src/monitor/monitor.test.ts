@@ -124,7 +124,10 @@ describe("renderMonitor", () => {
     document.body.innerHTML = "";
   });
 
-  function setLocation(protocol: "http:" | "https:", host = "example.test:8100"): void {
+  function setLocation(
+    protocol: "http:" | "https:",
+    host = "example.test:8100",
+  ): void {
     locationGetterSpy?.mockRestore();
     locationGetterSpy = vi
       .spyOn(window, "location", "get")
@@ -165,24 +168,28 @@ describe("renderMonitor", () => {
     await flushPromises();
 
     expect(root.querySelector(".monitor-shell")).not.toBeNull();
-    expect(root.querySelector(".monitor-title")?.textContent).toBe("No session selected");
-    expect(root.querySelector(".monitor-terminal-placeholder")).not.toBeNull();
-    expect(root.querySelector(".monitor-terminal-placeholder")?.classList.contains("is-hidden"))
-      .toBe(false);
-    expect(FakeWebSocket.instances).toHaveLength(0);
-    expect(root.querySelector(".monitor-command-empty")?.classList.contains("is-visible")).toBe(
-      true,
+    expect(root.querySelector(".monitor-title")?.textContent).toBe(
+      "No session selected",
     );
+    expect(root.querySelector(".monitor-terminal-placeholder")).not.toBeNull();
+    expect(
+      root
+        .querySelector(".monitor-terminal-placeholder")
+        ?.classList.contains("is-hidden"),
+    ).toBe(false);
+    expect(FakeWebSocket.instances).toHaveLength(0);
+    expect(
+      root
+        .querySelector(".monitor-command-empty")
+        ?.classList.contains("is-visible"),
+    ).toBe(true);
   });
 
   it("renders active monitor with session metadata and loads sessions list", async () => {
     setViewportWidth(1920);
     setLocation("http:");
     const session = createActiveSession("abc");
-    listSessionsMock.mockResolvedValue([
-      session,
-      createActiveSession("def"),
-    ]);
+    listSessionsMock.mockResolvedValue([session, createActiveSession("def")]);
     getSessionMock.mockResolvedValue(session);
 
     const root = createRoot();
@@ -199,11 +206,17 @@ describe("renderMonitor", () => {
     });
 
     expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(root.querySelector(".session-id")?.textContent).toContain("Session: abc");
-    expect(root.querySelector(".monitor-title")?.textContent).toBe("Session abc");
+    expect(root.querySelector(".session-id")?.textContent).toContain(
+      "Session: abc",
+    );
+    expect(root.querySelector(".monitor-title")?.textContent).toBe(
+      "Session abc",
+    );
     const activeRow = root.querySelector(".monitor-session-item.is-active");
     expect(activeRow).not.toBeNull();
-    expect(activeRow?.querySelector(".monitor-session-item-title")?.textContent).toContain("Session abc");
+    expect(
+      activeRow?.querySelector(".monitor-session-item-title")?.textContent,
+    ).toContain("Session abc");
   });
 
   it("keeps sidebars collapsible and writes collapsed state to shell tokens", async () => {
@@ -224,13 +237,17 @@ describe("renderMonitor", () => {
     leftToggle?.click();
     expect(shell?.dataset.leftHidden).toBe("true");
     expect(
-      root.querySelector<HTMLElement>("#monitor-left-badge-banner")?.getAttribute("data-visible"),
+      root
+        .querySelector<HTMLElement>("#monitor-left-badge-banner")
+        ?.getAttribute("data-visible"),
     ).toBe("true");
 
     rightToggle?.click();
     expect(shell?.dataset.rightHidden).toBe("true");
     expect(
-      root.querySelector<HTMLElement>("#monitor-right-badge-banner")?.getAttribute("data-visible"),
+      root
+        .querySelector<HTMLElement>("#monitor-right-badge-banner")
+        ?.getAttribute("data-visible"),
     ).toBe("true");
   });
 
@@ -303,18 +320,10 @@ describe("renderMonitor", () => {
 
     expect(terminalCalls).toEqual(["clear", "write", "fit", "write"]);
     expect(Array.from(terminalSpies.write.mock.calls[0][0])).toEqual([
-      104,
-      101,
-      108,
-      108,
-      111,
+      104, 101, 108, 108, 111,
     ]);
     expect(Array.from(terminalSpies.write.mock.calls[1][0])).toEqual([
-      119,
-      111,
-      114,
-      108,
-      100,
+      119, 111, 114, 108, 100,
     ]);
   });
 
@@ -376,7 +385,9 @@ describe("renderMonitor", () => {
     const socket = FakeWebSocket.instances[0];
 
     socket.dispatch("open");
-    socket.dispatch("message", { data: JSON.stringify({ type: "terminal", data: "aGVsbG8=" }) });
+    socket.dispatch("message", {
+      data: JSON.stringify({ type: "terminal", data: "aGVsbG8=" }),
+    });
 
     expect(terminalCalls).toContain("write");
   });

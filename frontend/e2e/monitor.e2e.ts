@@ -138,7 +138,8 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
 
     await reopened.getByRole("link", { name: "Back to dashboard" }).click();
     await expect(reopened).toHaveURL(/\/$/);
-    await expect(reopened.locator(".dashboard")).toBeVisible();
+    await expect(reopened.locator(".monitor-page")).toBeVisible();
+    await expect(reopened.locator(".monitor-title")).toHaveText("No session selected");
     await reopened.close();
 
     expect(pageErrors).toEqual([]);

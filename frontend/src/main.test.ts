@@ -44,16 +44,17 @@ describe("main route dispatch", () => {
     await import("./main");
   }
 
-  it("renders monitor scaffold on root with no active session", async () => {
+  it("renders idle monitor scaffold on root", async () => {
     await bootstrapForPath("/");
 
     expect(renderMonitorMock).toHaveBeenCalledTimes(1);
     expect(renderMonitorMock).toHaveBeenCalledWith(expect.any(HTMLDivElement));
     expect(renderDashboardMock).not.toHaveBeenCalled();
     expect(
-      document.querySelector(".monitor-page-placeholder")?.getAttribute("data-session"),
+      document
+        .querySelector(".monitor-page-placeholder")
+        ?.getAttribute("data-session"),
     ).toBe("none");
-    expect(document.querySelector(".dashboard-page-placeholder")).toBeNull();
   });
 
   it("renders dashboard for non-monitor, non-root paths", async () => {
@@ -61,7 +62,9 @@ describe("main route dispatch", () => {
 
     expect(renderDashboardMock).toHaveBeenCalledTimes(1);
     expect(renderMonitorMock).not.toHaveBeenCalled();
-    expect(document.querySelector(".dashboard-page-placeholder")).not.toBeNull();
+    expect(
+      document.querySelector(".dashboard-page-placeholder"),
+    ).not.toBeNull();
   });
 
   it("renders monitor scaffold for explicit monitor session route", async () => {
@@ -73,5 +76,21 @@ describe("main route dispatch", () => {
       "abc-123",
     );
     expect(renderDashboardMock).not.toHaveBeenCalled();
+  });
+
+  it("renders idle monitor scaffold for monitor root", async () => {
+    await bootstrapForPath("/monitor");
+
+    expect(renderMonitorMock).toHaveBeenCalledTimes(1);
+    expect(renderMonitorMock).toHaveBeenCalledWith(
+      expect.any(HTMLDivElement),
+      undefined,
+    );
+    expect(renderDashboardMock).not.toHaveBeenCalled();
+    expect(
+      document
+        .querySelector(".monitor-page-placeholder")
+        ?.getAttribute("data-session"),
+    ).toBe("none");
   });
 });

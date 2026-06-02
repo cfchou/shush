@@ -11,6 +11,10 @@ HOME_DIR="${ROOT_DIR}/.remote-ssh-home"
 SSH_CONFIG="${HOME_DIR}/.ssh/config"
 SERVER_LOG="${ROOT_DIR}/.remote-server.log"
 
+ssh_config_quote() {
+  printf '"%s"' "${1//\"/\\\"}"
+}
+
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]]; then
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
@@ -26,12 +30,13 @@ fi
 
 mkdir -p "${HOME_DIR}/.ssh"
 chmod 700 "${HOME_DIR}/.ssh"
+IDENTITY_FILE_QUOTED="$(ssh_config_quote "${KEY_FILE}")"
 cat > "${SSH_CONFIG}" <<CFG
 Host shush-docker
   HostName 127.0.0.1
   User shush
   Port ${PORT}
-  IdentityFile ${KEY_FILE}
+  IdentityFile ${IDENTITY_FILE_QUOTED}
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
 CFG
