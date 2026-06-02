@@ -43,6 +43,10 @@ Two tmux client processes per session managed by SS:
 - **SC connection**: `tmux -L shush -CC attach -t <session>` (Control Mode, PTY-backed client process)
 - **FE connection**: `tmux -L shush attach -t <session> -r` (read-only, PTY-backed client process, raw ANSI stream, spawned on-demand for browser viewers)
 
+Terminology note: `FE` in backend docs means frontend-facing tmux stream handled by backend `crates/shush-bin/src/fe_master.rs`, not TypeScript frontend app under `frontend/`.
+
+Implementation note (2026-06-02): command completion is now driven from persistent SC control-mode `%output` stream, not FE bytes. FE remains browser-facing only and backend `fe_master.rs` strips wrapped marker echoes / APC marker sequences before forwarding terminal bytes to xterm.js.
+
 The `host` field on Session determines the backend: `""`/`"localhost"` = direct tmux, `"user@host"` = SSH.
 
 ## Project Structure
@@ -61,24 +65,14 @@ shush/
 │   └── shush-bin/                 # binary: `shush server` / `shush client`
 │       ├── Cargo.toml
 │       └── src/
-│           ├── main.rs            # clap dispatch
-│           ├── cli.rs             # CLI definition (server, client subcommands)
-│           ├── server/
-│           │   ├── mod.rs
-│           │   ├── session_manager.rs  # in-memory Session store (Arc<RwLock<HashMap>>)
-│           │   ├── tmux_control.rs     # TmuxControlModeClient: spawn, events, send-keys
-│           │   ├── fe_master.rs        # FE connection: spawn, stdout broadcast, capture-pane
-│           │   ├── command_queue.rs    # per-session FIFO queue + state machine
-│           │   ├── api/                # Axum handlers
-│           │   │   ├── mod.rs
-│           │   │   ├── sessions.rs
-│           │   │   ├── commands.rs
-│           │   │   ├── ws.rs           # WebSocket handler
-│           │   │   └── yolo.rs
-│           │   └── abort.rs            # SIGINT → kill-pane
-│           └── client/
-│               ├── mod.rs
-│               └── api_client.rs       # reqwest-based REST client
+│           ├── main.rs                 # clap dispatch
+│           ├── cli.rs                  # CLI definition
+│           ├── server.rs               # Axum app, routes, WebSocket handler
+│           ├── session_manager.rs      # in-memory Session store + card history
+│           ├── command_executor.rs     # approved-command execution + marker completion
+│           ├── tmux_control.rs         # SC control-mode client + registry
+│           ├── fe_master.rs            # FE stream attach, filtering, snapshot/replay
+│           └── remote_tmux.rs          # local/SSH tmux helpers
 ├── frontend/
 │   ├── package.json
 │   ├── tsconfig.json
@@ -124,14 +118,17 @@ Implementation note (2026-06-01): `shush server` now supports `--port <u16>`. De
 
 `GET /api/sessions/:id/stream` → upgrade to WebSocket
 
-**Purpose**: stream terminal ANSI output only. Command state changes are fetched via REST (`GET /sessions/:id`, `GET /sessions/:id/commands`).
+**Purpose**: stream terminal ANSI output plus command-card updates for monitor view. REST still provides initial/session fetches and command history endpoints.
 
-**Server → Client messages (JSON, `data` field is base64):**
+**Server → Client messages:**
 ```json
 {"type":"terminal","data":"<base64-encoded-ansi-bytes>"}
 {"type":"snapshot","data":"<base64-capture-pane-content>"}
+{"type":"card","card":{ /* CommandCard */ }}
 ```
 `terminal` = live stream bytes. `snapshot` = full capture-pane on join.
+
+`card` = command lifecycle update (`pending`, `executing`, `completed`, `rejected`, `aborted`) for monitor card list.
 
 Implementation note (2026-06-01): for remote late-join stability, SS may send a bounded replay of recent FE terminal bytes immediately after `snapshot` for additional viewers. Replay uses the same `terminal` message shape.
 
@@ -243,37 +240,41 @@ cargo test -p shush-core
 
 `session_manager.rs`:
 - `SessionManager` struct: `Arc<RwLock<HashMap<Uuid, Session>>>`
-- `create(name, host) -> Result<Uuid>` — create logic session, spawn tmux session + Control Mode client
+- `create(name, host) -> Session` — create logical session, ensure backing tmux session exists, size window for monitor stability
 - `delete(id)` — kill tmux session, remove
 - `get(id) -> Session`
 - `list() -> Vec<Session>`
+- owns current command plus completed/rejected/aborted command history
+- publishes card updates to subscribers
 
 `tmux_control.rs`:
 - `TmuxControlModeClient` struct:
-  - `spawn(session_name: &str) -> Result<Self>` — runs `tmux -L shush new-session -d -s <name>` then `tmux -L shush -CC attach -t <name>`
+  - `spawn(session_name: &str, session_host: &str) -> Result<Self>` — attaches a persistent PTY-backed `tmux -L shush -CC attach -t <name>` client to the existing local or SSH-backed tmux session
   - Manages child process stdin/stdout with Tokio
-  - `event_stream() -> impl Stream<Item=TmuxEvent>` — async stream of parsed tmux events
-  - `send_keys(text: &str)` — writes to stdin (Control Mode command: `send-keys -t <pane> <text>`)
+  - `read_event() -> Option<TmuxEvent>` — async read of parsed control-mode events
+  - `send_keys(text: &str)` — writes literal text via control-mode `send-keys -l -- ...`
   - `inject_command(command: &str)` — wraps with markers and calls send_keys
   - `active_pane: Option<String>` — tracked from `%window-pane-changed` events
   - `abort()` — calls `send_keys("C-c")`, fallback to kill-pane
 
-`command_queue.rs`:
-- `CommandQueue` struct: per-session queue, at most one command in PENDING or EXECUTING
-- `submit(command: String) -> CommandCard` — create CommandCard in PENDING state, set as current
-- `process_next()` — if current is PENDING and session is IDLE, execute
-- `execute()` — calls `TmuxControlModeClient::inject_command`, transitions to EXECUTING
-- `approve()` — promote current command from PENDING to EXECUTING
-- `deny()` — clear current command, set REJECTED, session back to IDLE
-- `abort()` — call abort on TmuxControlModeClient, set ABORTED, session back to IDLE
-- Marker detection callback: when end marker found, transition to IDLE, store exit code + output, call process_next if new command queued
+`fe_master.rs`:
+- FE here means frontend-facing backend stream, not frontend TypeScript code
+- `FeMasterRegistry` owns read-only tmux attach clients for browser viewers
+- `TerminalOutputFilter` strips APC marker sequences and rewrites wrapped command echo to plain user command for browser rendering
+
+`command_executor.rs`:
+- executes approved command through persistent SC control-mode client
+- uses `MarkerInjector` to wrap command
+- waits for matching marker completion on SC `%output`
+- extracts command output, exit code, and completes command in `SessionManager`
+- on failure, marks command aborted and drops stale control-mode client from registry
 
 Session lifecycle during create:
 1. Generate UUID, create Session struct (Idle state)
 2. Spawn `tmux -L shush new-session -d -s <name>`
-3. Spawn `tmux -L shush -CC attach -t <name>`, capture child handles
-4. Start event reader task (tokio::spawn) that reads %output, updates command cards
-5. Store TmuxControlModeClient in Session
+3. Resize session window for monitor stability
+4. Defer SC `tmux -L shush -CC attach -t <name>` until first approved command needs execution
+5. Defer FE read-only attach until first browser viewer connects
 6. Set session state to Idle
 
 Verification:
@@ -284,35 +285,20 @@ cargo test -p shush-bin -- --test-threads=1
 
 ### Phase 4: REST API Server (3-4h)
 
-`api/mod.rs`:
-- Axum router setup: `Router::new().nest("/api", api_routes())`
-- Shared state: app state containing `SessionManager` plus FE master registry
-- Tower CORS layer (allow localhost origins)
-- Static file serving for frontend with SPA fallback to `index.html` for deep links like `/monitor/:sessionId`
+`server.rs`:
+- Axum router setup under `/api`
+- Shared state: `SessionManager`, `FeMasterRegistry`, `TmuxControlModeRegistry`, `CommandExecutor`
+- REST handlers for sessions, commands, approve/deny/yolo actions
+- WebSocket handler for terminal stream + card updates
+- Static frontend serving with SPA fallback for deep links like `/monitor/:sessionId`
 
-`api/sessions.rs`:
-- `create_session`, `list_sessions`, `get_session`, `delete_session` handlers
-- `session_action` — POST `/sessions/:id?action=...`, dispatches to:
-  - `submit` → validates session, creates CommandCard, submits to queue
-  - `approve` → validates PENDING state
-  - `deny` → validates PENDING state
-  - `abort` → validates EXECUTING state
-  - `yolo` → toggles flag
-- `list_commands` — GET `/sessions/:id/commands`, query limit parameter
-- All return JSON
-
-`api/ws.rs`:
-- `ws_handler` — Axum WebSocket upgrade
-- On connect:
-  1. Spawn FE master connection: `tmux -L shush attach -t <session> -r` under a PTY
-  2. Send `capture-pane` snapshot as `{"type":"snapshot",...}`
-  3. Fork reader task: reads FE stdout in chunks, broadcasts to WebSocket as `{"type":"terminal","data":"..."}`
-  4. Subscribe to command card state changes, push `{"type":"card","card":...}`
-  5. On disconnect: close FE connection (with idle timeout before full teardown)
-- FE connection lifecycle:
-  - First WS connect → spawn FE master
-  - Last WS disconnect → start 5s idle timer → tear down FE master
-  - New WS connect during timer → cancel timer, keep FE master
+WebSocket behavior in `server.rs`:
+1. Get or spawn FE master connection: `tmux -L shush attach -t <session> -r` under PTY
+2. Send `capture-pane` snapshot as `{"type":"snapshot",...}`
+3. If needed, send bounded FE replay buffer after snapshot for late joiners
+4. Forward FE stdout chunks as `{"type":"terminal","data":"..."}`
+5. Subscribe to command card state changes, push `{"type":"card","card":...}`
+6. On disconnect: start FE idle timeout before teardown
 
 Verification:
 ```bash

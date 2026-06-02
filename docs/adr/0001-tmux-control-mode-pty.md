@@ -10,10 +10,12 @@
 
 shush maintains **two separate tmux client processes** per managed session:
 
+Terminology note: `FE` in this ADR means frontend-facing backend stream handled by `crates/shush-bin/src/fe_master.rs`, not browser TypeScript code under `frontend/`.
+
 | Connection | Command | Purpose |
 |---|---|---|
 | **SC connection** | `tmux -L shush -CC attach -t <session>` | Structured event stream (`%output`, `%begin`, `%end`, `%session-changed`); marker detection; `send-keys` for command injection |
-| **FE connection** | `tmux -L shush attach -t <session> -r` | Raw ANSI byte stream read from a PTY-backed attach client, base64-encoded into `{"type":"terminal"}` WebSocket frames for xterm.js |
+| **FE connection** | `tmux -L shush attach -t <session> -r` | Raw ANSI byte stream read from a PTY-backed attach client, filtered in backend `fe_master.rs`, then base64-encoded into `{"type":"terminal"}` WebSocket frames for xterm.js |
 
 The FE connection uses plain `attach -r` (read-only, **no `-CC`**). Early investigation assumed this path would work headlessly with piped stdio and no PTY. Runtime verification on tmux `3.6b` on macOS contradicted that assumption: `attach -r` also exits immediately with `open terminal failed: not a terminal` when spawned without a tty. The FE connection therefore also needs a PTY, even though it does not use control mode.
 

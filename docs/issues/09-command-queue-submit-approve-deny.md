@@ -8,20 +8,31 @@ Priority: high
 
 **Backend only.** Implement the command queue and REST actions for submit/approve/deny, plus push card state changes over the existing WebSocket.
 
-**command_queue.rs:**
+## Historical context
+
+This issue was written against earlier design that used a dedicated `command_queue.rs` and FE-stream-based marker completion. Current implementation no longer matches that exact structure.
+
+Current implementation lives mainly in:
+
+- `crates/shush-bin/src/session_manager.rs`
+- `crates/shush-bin/src/command_executor.rs`
+- `crates/shush-bin/src/tmux_control.rs`
+- `crates/shush-bin/src/fe_master.rs`
+
+**Superseded design sketch (`command_queue.rs`):**
 - `CommandQueue` struct: per-session FIFO queue, at most one command in PENDING or EXECUTING at a time
 - `submit(command: String) -> CommandCard` — create CommandCard in PENDING state, set as current command on session
 - `process_next()` — if current is PENDING and session is IDLE, call execute()
 - `execute()` — calls `TmuxControlModeClient::inject_command()` (wraps with markers via MarkerInjector), transitions to EXECUTING, updates session state
 - `approve()` — promote current command from PENDING to EXECUTING, call execute()
 - `deny()` — set card to REJECTED, clear current command, session back to IDLE
-- Marker detection integration: when `MarkerDetector` finds end marker via the FE master output stream:
+- Marker detection integration in this older sketch: when `MarkerDetector` finds end marker via FE master output stream:
   - Extract exit code from marker metadata
   - Set card to Completed(exit_code), collect accumulated output
   - Clear current command, session back to IDLE
   - Call process_next() for any queued command
 
-**REST endpoints (add to api/sessions.rs or new api/commands.rs):**
+**REST endpoints (older route-module wording: `api/sessions.rs` or new `api/commands.rs`):**
 - `POST /api/sessions/:id?action=submit` — body: `{"command":"..."}` — validate session exists, create card, submit to queue
 - `POST /api/sessions/:id?action=approve` — validate PENDING state
 - `POST /api/sessions/:id?action=deny` — validate PENDING state
@@ -78,5 +89,5 @@ Follow-up issue:
 
 ## References
 
-- Plan: `docs/shush-v01-plan.md` (Phase 3 command_queue, Phase 4 actions + commands list)
+- Plan: `docs/shush-v01-plan.md` (current `session_manager.rs`, `command_executor.rs`, `server.rs` sections)
 - Marker protocol: `docs/shush-v01-plan.md` (marker.rs in Phase 2)
