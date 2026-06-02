@@ -192,14 +192,7 @@ impl TmuxControlModeClient {
                         return None;
                     }
                     Ok(_) => return Some(line.trim_end().to_string()),
-                    Err(err)
-                        if matches!(
-                            err.kind(),
-                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
-                        ) =>
-                    {
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(_) => return None,
                 }
             } else {
@@ -323,7 +316,24 @@ impl TmuxControlModeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+    };
+    use tokio::io::ReadBuf;
     use tokio::io::{self, AsyncReadExt};
+
+    struct WouldBlockReader;
+
+    impl AsyncRead for WouldBlockReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::WouldBlock)))
+        }
+    }
 
     #[test]
     fn new_creates_empty_client() {
@@ -476,6 +486,14 @@ mod tests {
     #[tokio::test]
     async fn read_line_returns_none_when_no_stdout() {
         let mut client = TmuxControlModeClient::new();
+        assert!(client.read_line().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn read_line_returns_none_on_would_block() {
+        let (client_stdin, _) = io::duplex(1024);
+        let mut client = mock_client(Box::new(client_stdin), Box::new(WouldBlockReader));
+
         assert!(client.read_line().await.is_none());
     }
 
