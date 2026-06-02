@@ -162,10 +162,9 @@ impl TmuxControlModeClient {
             .await
     }
 
-    /// Write a control-mode `send-keys` command for a non-literal key name.
-    pub async fn send_key(&mut self, key: &str) -> Result<(), String> {
-        self.send_control_command(&format!("send-keys {key}\n"))
-            .await
+    /// Submit the current shell line by sending Enter.
+    pub async fn send_enter(&mut self) -> Result<(), String> {
+        self.send_control_command("send-keys Enter\n").await
     }
 
     #[allow(dead_code)]
@@ -173,7 +172,7 @@ impl TmuxControlModeClient {
         let injector = MarkerInjector::new();
         let (wrapped, nonce) = injector.inject(command);
         self.send_keys(&wrapped).await?;
-        self.send_key("Enter").await?;
+        self.send_enter().await?;
         Ok(nonce)
     }
 
@@ -387,12 +386,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_key_writes_named_key() {
+    async fn send_enter_writes_enter_key() {
         let (client_stdin, mut mock_stdin) = io::duplex(1024);
         let (_mock_stdout, client_stdout) = io::duplex(1024);
         let mut client = mock_client(Box::new(client_stdin), Box::new(client_stdout));
 
-        client.send_key("Enter").await.unwrap();
+        client.send_enter().await.unwrap();
 
         let mut buf = vec![0u8; 64];
         let n = mock_stdin.read(&mut buf).await.unwrap();
@@ -655,7 +654,7 @@ mod integration_tests {
 
         cc.send_keys("echo shush_marker_99").await.unwrap();
         // Send an Enter key via control-mode command.
-        cc.send_key("Enter").await.unwrap();
+        cc.send_enter().await.unwrap();
 
         // Drain events looking for the marker.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);

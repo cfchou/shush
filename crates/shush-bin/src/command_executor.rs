@@ -57,7 +57,7 @@ impl CommandExecutor {
                 .queue_command_echo_replacement(session_id, current.command.as_bytes())
                 .await;
             control.send_keys(&wrapped_command).await?;
-            control.send_key("Enter").await?;
+            control.send_enter().await?;
 
             let (exit_code, raw_output) = wait_for_completion(&mut *control, &nonce).await?;
             let output = extract_command_output(&raw_output, &nonce, exit_code);
