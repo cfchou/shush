@@ -120,9 +120,9 @@ Move command completion detection off the FE stream and onto a persistent tmux c
 - [ ] Remote monitor Playwright regression test passes with `SHUSH_E2E_REMOTE=1 SHUSH_E2E_ASSERT_STREAM=1`
 - [ ] `cargo test` passes
 
-## Blocked by / related
+## Blocks / Related
 
-- Extends `docs/issues/09-command-queue-submit-approve-deny.md`
+- Blocks finishing `docs/issues/09-command-queue-submit-approve-deny.md`
 - Related to `docs/issues/03-fe-master-terminal-stream.md`
 - Backed by `docs/adr/0001-tmux-control-mode-pty.md`
 - Backed by `docs/adr/0003-tmux-ansi-stream-encoding.md`
