@@ -236,7 +236,7 @@ Attempted. Fails for the same reason — `tcgetattr` is called unconditionally r
 ## References
 
 - `crates/shush-bin/src/tmux_control.rs` — implementation
-- `docs/shush-v01-implementation-plan-2026-05-28-approved.md` — Phase 3 spec (lines 241–267)
+- `docs/shush-v01-plan.md` — Phase 3 spec (lines 241–267)
 - tmux `client.c` line 344–361: <https://github.com/tmux/tmux/blob/3.6/client.c#L344>
 - `portable-pty` crate: <https://crates.io/crates/portable-pty> (WezTerm project)
 - tmux control mode: `man tmux`, search for `-CC`

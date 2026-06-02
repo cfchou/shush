@@ -78,5 +78,5 @@ Follow-up issue:
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Phase 3 command_queue, Phase 4 actions + commands list)
-- Marker protocol: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (marker.rs in Phase 2)
+- Plan: `docs/shush-v01-plan.md` (Phase 3 command_queue, Phase 4 actions + commands list)
+- Marker protocol: `docs/shush-v01-plan.md` (marker.rs in Phase 2)

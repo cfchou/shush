@@ -38,6 +38,6 @@ None - can start immediately
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Phase 2)
+- Plan: `docs/shush-v01-plan.md` (Phase 2)
 - Existing: `crates/shush-core/src/session.rs` (partially complete)
 - Existing: `crates/shush-core/Cargo.toml` (dependencies declared)

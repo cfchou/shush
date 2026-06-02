@@ -1,53 +1,68 @@
+## Rules
 
-# Rules
-
-- DO NOT read anything in 'tmp/' unless user explicitly say so
-
-- DO NOT commit unless user explicitly say so
-
-# Guideline
-
+- DO NOT read anything in `tmp/` unless explicitly told to.
+- DO NOT commit unless the user explicitly asks.
 - Only implement one issue at a time.
+- Before implementation, plan for TDD (use `/tdd` skill when available).
+- During implementation:
+  - If plans have technical gaps: stop and get user input for big gaps
+  - Tick `[x]` on issue acceptance-criteria entries when done.
+  - MUST write unit tests.
+  - SHOULD write E2E tests.
+  - MUST pass all tests before marking complete.
+- After implementation, request an update to Plans and/or ADRs to close any remaining gaps.
 
-- Before implementation, 
-    * Plan for TDD (use /tdd skill if available)
-    
-- During implementation, 
-    * if spotting technical gaps, inconsistency or ambiguity in Plans:
-        - If it's a big gap, stop and then present the problem to the user.
-        - Otherwise, launch subagents to research, write an ADR, then continue.
-    * Tick the '[ ]' box of Acceptance Criteria in the issue when one is done.
-    * MUST write unit tests.
-    * SHOULD write E2E tests.
-    * MUST pass all tests before calling it done.
+## Must read
 
-- After implementation:
-    * Request to update *Plans* after implementation to close any gap.
+- `docs/shush-v01-plan.md`
+- `docs/shush-v01-plan-diagrams.md`
+- `docs/issues/*` for issue ownership; smaller issue number = higher priority.
+- `docs/adr/*` when decisions or tradeoffs are needed.
 
+## Repository shape
 
-# Plans
+- Rust workspace in `Cargo.toml` with members:
+  - `crates/shush-core` (shared types/parsers/marker logic)
+  - `crates/shush-bin` (binary and Axum API server)
+- `crates/shush-bin` has both CLI entry and HTTP server:
+  - `crates/shush-bin/src/main.rs`
+  - `crates/shush-bin/src/cli.rs` (`shush server --port <PORT>` supported)
+  - `crates/shush-bin/src/server.rs` handles `/api/*` and serves `frontend/dist`.
+- The `client` CLI subcommand is parsed but currently not implemented.
+- Frontend app entrypoints in `frontend/src/main.ts`:
+  - `/monitor/:id` -> monitor page
+  - anything else -> dashboard page
+- Server can serve UI directly from `frontend/dist`, but Vite dev (`npm run dev`) proxies `/api` to `127.0.0.1:8100`.
 
-*MUST READ*
+## High-signal commands
 
-- docs/shush-v01-implementation-plan-2026-05-28-approved.md
-- docs/diagrams.md
+- Rust backend:
+  - `cargo check --workspace`
+  - `cargo fmt -p shush-core`
+  - `cargo fmt -p shush-bin`
+  - `taplo fmt`
+  - `cargo machete`
+  - `cargo test --verbose`
+  - `cargo clippy --workspace --all-targets --all-features`
+- Targeted verification:
+  - `cargo test -p shush-core`
+  - `cargo test -p shush-bin -- <test_filter>`
+- Frontend:
+  - `cd frontend && npm install`
+  - `cd frontend && npm run build` (required before backend static serving checks)
+  - `cd frontend && npm run test`
+  - `cd frontend && npm run test -- <path-or-pattern>` (single Vitest target)
+  - `cd frontend && npm run lint`
+  - `cd frontend && npm run format:check`
+  - `cd frontend && npm run test:e2e` (Playwright; runs `frontend/e2e/*.e2e.ts`)
 
-# ADRs
+## E2E and remote coverage
 
-ADR is for deep research and decisions, read/write if you need to.
-
-- docs/adr/*
-
-# Issues
-
-Usually only need to read the issue you are dealing with.
-
-Smaller number in the filename represents higher priority.
-
-
-- docs/issues/*
-
-# Scripts
-
-- One-command remote E2E run with auto-stop:
-    * `./scripts/run_remote_e2e.sh`
+- Full remote coverage helper: `./scripts/run_remote_e2e.sh` (starts/stops SSH target and runs Playwright with remote/assert flags).
+- Remote target lifecycle helper: `./scripts/remote_ssh_target.sh` (`start|stop|restart|cleanup`).
+- Frontend E2E defaults in-repo:
+  - `SHUSH_E2E_REMOTE=1`
+  - `SHUSH_E2E_ASSERT_STREAM=1`
+  - `SHUSH_E2E_REMOTE_HOST=shush-docker`
+  - `SHUSH_SSH_CONFIG=<repo>/.remote-ssh-home/.ssh/config`
+  - `SHUSH_E2E_REMOTE_HOME=<repo>/.remote-ssh-home`

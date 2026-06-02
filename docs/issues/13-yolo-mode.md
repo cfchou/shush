@@ -36,4 +36,4 @@ Add per-session YOLO mode that bypasses the approval gate. When YOLO is enabled,
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (YOLO mode throughout, api/yolo.rs)
+- Plan: `docs/shush-v01-plan.md` (YOLO mode throughout, api/yolo.rs)

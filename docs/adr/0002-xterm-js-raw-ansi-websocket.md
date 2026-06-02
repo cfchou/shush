@@ -193,5 +193,5 @@ Separate WebSocket for terminal bytes (binary), separate one for JSON events (ca
 - xterm.js `terminal.write()` API: <https://xtermjs.org/docs/api/terminal/classes/terminal>
 - xterm.js flow control guide: <https://xtermjs.org/docs/guides/flowcontrol>
 - xterm.js hooks / execution contexts: <https://xtermjs.org/docs/guides/hooks>
-- `docs/shush-v01-implementation-plan-2026-05-28-approved.md` — Phase 4 spec (lines 294–305)
+- `docs/shush-v01-plan.md` — Phase 4 spec (lines 294–305)
 - ADR-0001 — FE connection does not need PTY; SC connection does

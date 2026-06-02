@@ -11,18 +11,24 @@ What this does:
 - Starts `cargo run -- server`
 - Runs Playwright monitor-browser tests
 
-## Remote session coverage
+## E2E defaults and remote session coverage
 
-Remote monitor coverage is included in the spec but gated behind env flags so local runs without a Docker SSH target remain deterministic.
+Frontend E2E defaults in this repository now enable both remote mode and stream assertions:
 
-Enable remote coverage after setting up issue-05 remote target:
+- `SHUSH_E2E_REMOTE=1`
+- `SHUSH_E2E_ASSERT_STREAM=1`
+
+For remote monitor coverage, set up the SSH target first:
 
 ```bash
 ./scripts/remote_ssh_target.sh
+npm run test:e2e
 ```
 
+To run local-only E2E without remote session coverage, pass:
+
 ```bash
-SHUSH_E2E_REMOTE=1 npm run test:e2e
+SHUSH_E2E_REMOTE=0 npm run test:e2e
 ```
 
 Optional overrides:
@@ -32,12 +38,12 @@ Optional overrides:
 
 ## Stream-content assertions
 
-By default, E2E verifies browser flow and reconnect lifecycle while avoiding fragile stream-content checks in environments where headless browser WS instrumentation is unstable.
+By default, tests assert stream/snapshot payload expectations in-browser.
 
-Enable strict stream-content assertions with:
+Disable it per run if needed with:
 
 ```bash
-SHUSH_E2E_ASSERT_STREAM=1 npm run test:e2e
+SHUSH_E2E_ASSERT_STREAM=0 npm run test:e2e
 ```
 
 When enabled, tests assert that snapshot/terminal payloads observed in-browser include expected sentinels.

@@ -62,5 +62,5 @@ Implement the FE master connection lifecycle and WebSocket terminal stream, so t
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Phase 4 ws.rs, Phase 5 terminal.ts + monitor.ts)
+- Plan: `docs/shush-v01-plan.md` (Phase 4 ws.rs, Phase 5 terminal.ts + monitor.ts)
 - FE connection lifecycle: plan Key Decisions table, FE connection row

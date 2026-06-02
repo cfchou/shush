@@ -33,7 +33,7 @@ Evidence:
     - `%output` from control-mode is the stream SS should parse for markers
   - `docs/adr/0001-tmux-control-mode-pty.md`
     - marker-based command lifecycle depends on `%output`
-  - `docs/shush-v01-implementation-plan-2026-05-28-approved.md`
+  - `docs/shush-v01-plan.md`
     - session lifecycle calls for a persistent `tmux -CC attach` client whose `%output` drives command lifecycle
 
 So there are two separate bugs/gaps:

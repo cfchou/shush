@@ -56,5 +56,5 @@ Priority: medium
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Phase 5 card_list.ts, Phase 4 actions + sessions)
+- Plan: `docs/shush-v01-plan.md` (Phase 5 card_list.ts, Phase 4 actions + sessions)
 - Also update `api.ts` to add `sessionAction()` and `listCommands()`

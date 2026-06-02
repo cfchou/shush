@@ -526,11 +526,11 @@ async function terminalText(page: import("@playwright/test").Page): Promise<stri
 }
 
 function isRemoteEnabled(): boolean {
-  return process.env.SHUSH_E2E_REMOTE === "1";
+  return (process.env.SHUSH_E2E_REMOTE ?? "1") === "1";
 }
 
 function isStreamAssertEnabled(): boolean {
-  return process.env.SHUSH_E2E_ASSERT_STREAM === "1";
+  return (process.env.SHUSH_E2E_ASSERT_STREAM ?? "1") === "1";
 }
 
 function remoteHomeDir(): string {

@@ -35,4 +35,4 @@ Add abort capability to kill a running command. When a user aborts, the server s
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Abort strategy in Key Decisions, abort.rs)
+- Plan: `docs/shush-v01-plan.md` (Abort strategy in Key Decisions, abort.rs)

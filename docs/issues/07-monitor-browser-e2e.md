@@ -49,4 +49,4 @@ This issue should validate the **existing** monitor experience end-to-end, not r
 ## References
 
 - Issue 03: `docs/issues/03-fe-master-terminal-stream.md`
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md`
+- Plan: `docs/shush-v01-plan.md`

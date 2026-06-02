@@ -54,6 +54,6 @@ This issue is about **testable remote session bring-up**, not full remote featur
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Architecture: local + remote tmux sessions, `host` field behavior)
+- Plan: `docs/shush-v01-plan.md` (Architecture: local + remote tmux sessions, `host` field behavior)
 - ADR-0001: `docs/adr/0001-tmux-control-mode-pty.md`
 - ADR-0002: `docs/adr/0002-xterm-js-raw-ansi-websocket.md`

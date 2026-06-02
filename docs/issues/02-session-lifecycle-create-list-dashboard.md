@@ -60,4 +60,4 @@ Create the `shush-bin` binary crate and implement the server scaffold with sessi
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Phase 1, Phase 3 session_manager + tmux_control, Phase 4 sessions routes, Phase 5 dashboard)
+- Plan: `docs/shush-v01-plan.md` (Phase 1, Phase 3 session_manager + tmux_control, Phase 4 sessions routes, Phase 5 dashboard)

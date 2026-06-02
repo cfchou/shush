@@ -55,4 +55,4 @@ This issue is about **tooling and enforcement**, not redesigning frontend code.
 
 - `frontend/package.json`
 - `.pre-commit-config.yaml`
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md`
+- Plan: `docs/shush-v01-plan.md`

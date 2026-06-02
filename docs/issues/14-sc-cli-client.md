@@ -51,4 +51,4 @@ Build the `shush client` subcommands so agents and scripts can interact with shu
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md` (Phase 6)
+- Plan: `docs/shush-v01-plan.md` (Phase 6)

@@ -57,6 +57,6 @@ This issue is about correcting that rule consistently across the runtime and doc
 
 ## References
 
-- Plan: `docs/shush-v01-implementation-plan-2026-05-28-approved.md`
+- Plan: `docs/shush-v01-plan.md`
 - Remote validation slice: `docs/issues/05-remote-ssh-ubuntu-docker-validation.md`
 - Remote validation doc: `docs/remote-ssh-validation.md`
