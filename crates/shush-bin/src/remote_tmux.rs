@@ -43,6 +43,42 @@ pub async fn run_tmux_output(host: &str, tmux_args: &[&str]) -> io::Result<Outpu
     }
 }
 
+pub async fn run_tmux_status_async(host: &str, tmux_args: &[&str]) -> io::Result<ExitStatus> {
+    run_tmux_output(host, tmux_args)
+        .await
+        .map(|output| output.status)
+}
+
+pub async fn run_tmux_shell_status_async(host: &str, tmux_args: &[&str]) -> io::Result<ExitStatus> {
+    let command = build_tmux_shell_command(tmux_args);
+
+    if is_local_host(host) {
+        tokio::process::Command::new("bash")
+            .args(["-lc", &command])
+            .status()
+            .await
+    } else {
+        let mut cmd = tokio::process::Command::new("ssh");
+        apply_ssh_config_async(&mut cmd);
+        cmd.arg(host).arg(&command);
+        cmd.status().await
+    }
+}
+
+fn build_tmux_shell_command(tmux_args: &[&str]) -> String {
+    let mut parts = vec![
+        "tmux".to_string(),
+        "-L".to_string(),
+        shell_quote(TMUX_SOCKET),
+    ];
+    parts.extend(tmux_args.iter().map(|arg| shell_quote(arg)));
+    parts.join(" ")
+}
+
+fn shell_quote(input: &str) -> String {
+    format!("'{}'", input.replace('\'', "'\\''"))
+}
+
 fn apply_ssh_config(cmd: &mut Command) {
     cmd.args(["-o", "BatchMode=yes"]);
     if let Ok(config) = std::env::var("SHUSH_SSH_CONFIG") {
@@ -70,5 +106,21 @@ mod tests {
         assert!(is_local_host(""));
         assert!(is_local_host("localhost"));
         assert!(!is_local_host("dev@127.0.0.1"));
+    }
+
+    #[test]
+    fn build_tmux_shell_command_quotes_arguments() {
+        let command = build_tmux_shell_command(&[
+            "send-keys",
+            "-l",
+            "-t",
+            "session one",
+            "printf '\\033_BEGIN_nonce\\033\\\\'; echo hello",
+        ]);
+
+        assert!(command.starts_with("tmux -L 'shush' 'send-keys' '-l' '-t' 'session one' "));
+        assert!(command.contains("printf"));
+        assert!(command.contains("echo hello"));
+        assert!(command.contains("\\033_BEGIN_nonce"));
     }
 }

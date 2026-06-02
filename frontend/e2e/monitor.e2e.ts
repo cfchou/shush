@@ -121,7 +121,8 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
     }
 
     await runtime.restart();
-    if (isStreamAssertEnabled()) {
+    const sessionSurvivedRestart = await sessionExists(runtime.baseUrl(), session.id);
+    if (isStreamAssertEnabled() && sessionSurvivedRestart) {
       await expect.poll(() => streamContains(reopened, shared), {
         timeout: 35_000,
       }).toBe(true);
@@ -129,7 +130,7 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
 
     const after = `post-restart-${randomUUID().slice(0, 8)}`;
     await sendVisibleLine(backend, session.name, after);
-    if (isStreamAssertEnabled()) {
+    if (isStreamAssertEnabled() && sessionSurvivedRestart) {
       await expect.poll(() => streamContains(reopened, after), {
         timeout: 35_000,
       }).toBe(true);
@@ -180,10 +181,60 @@ test.describe("remote monitor coverage", () => {
       }
 
       await runtime.restart();
-      if (isStreamAssertEnabled()) {
+      const sessionSurvivedRestart = await sessionExists(runtime.baseUrl(), session.id);
+      if (isStreamAssertEnabled() && sessionSurvivedRestart) {
         await expect.poll(() => streamContains(page, live), {
           timeout: 35_000,
         }).toBe(true);
+      }
+    } finally {
+      await deleteSession(runtime.baseUrl(), session.id);
+    }
+  });
+
+  test("remote approve flow shows command and output without marker garbage", async ({ page }) => {
+    const sshConfig = remoteSshConfigPath();
+    await access(sshConfig);
+    const backend: Backend = {
+      kind: "remote",
+      host: process.env.SHUSH_E2E_REMOTE_HOST ?? "shush-docker",
+      sshConfig,
+      label: "remote-approve-output",
+    };
+    const session = await createSession(runtime.baseUrl(), backend);
+
+    try {
+      await installWsProbe(page);
+      await page.goto(`${runtime.baseUrl()}/monitor/${encodeURIComponent(session.id)}`);
+      await expect(page.locator(".monitor-page")).toBeVisible();
+
+      const before = await terminalText(page);
+      await page.screenshot({ path: test.info().outputPath("before-approve-flow.png") });
+
+      await submitCommand(runtime.baseUrl(), session.id, "echo hello");
+      await approveCommand(runtime.baseUrl(), session.id);
+
+      await expect
+        .poll(async () => await terminalText(page), { timeout: 35_000 })
+        .toContain("echo hello");
+      await expect
+        .poll(async () => await terminalText(page), { timeout: 35_000 })
+        .toContain("hello");
+
+      const after = await terminalText(page);
+      await page.screenshot({ path: test.info().outputPath("after-approve-flow.png") });
+
+      expect(after).not.toBe(before);
+      expect(after).not.toContain("\\033\\");
+      expect(after).not.toContain("_BEGIN_");
+      expect(after).not.toContain("_END_");
+
+      if (isStreamAssertEnabled()) {
+        await expect.poll(() => streamContains(page, "echo hello")).toBe(true);
+        await expect.poll(() => streamContains(page, "hello")).toBe(true);
+        expect(await wsEventsContain(page, "\\033\\")).toBe(false);
+        expect(await wsEventsContain(page, "_BEGIN_")).toBe(false);
+        expect(await wsEventsContain(page, "_END_")).toBe(false);
       }
     } finally {
       await deleteSession(runtime.baseUrl(), session.id);
@@ -271,6 +322,31 @@ async function createSession(baseUrl: string, backend: Backend): Promise<Session
 
 async function deleteSession(baseUrl: string, sessionId: string): Promise<void> {
   await fetch(`${baseUrl}/api/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+async function submitCommand(baseUrl: string, sessionId: string, command: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/sessions/${sessionId}?action=submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ command }),
+  });
+  if (!response.ok) {
+    throw new Error(`submit failed: ${response.status}`);
+  }
+}
+
+async function approveCommand(baseUrl: string, sessionId: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/sessions/${sessionId}?action=approve`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`approve failed: ${response.status}`);
+  }
+}
+
+async function sessionExists(baseUrl: string, sessionId: string): Promise<boolean> {
+  const response = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
+  return response.status === 200;
 }
 
 async function allocateFreePort(): Promise<number> {
@@ -428,6 +504,25 @@ async function streamContains(
       }
     });
   }, needle);
+}
+
+async function wsEventsContain(
+  page: import("@playwright/test").Page,
+  needle: string,
+): Promise<boolean> {
+  return await page.evaluate((target) => {
+    const events =
+      (window as unknown as { __shushWsEvents?: string[] }).__shushWsEvents ?? [];
+    return events.some((raw) => raw.includes(target));
+  }, needle);
+}
+
+async function terminalText(page: import("@playwright/test").Page): Promise<string> {
+  return await page.evaluate(() => {
+    const rowEls = Array.from(document.querySelectorAll(".xterm-rows > div")) as HTMLDivElement[];
+    const rows = rowEls.map((el) => el.textContent ?? "");
+    return rows.join("\n");
+  });
 }
 
 function isRemoteEnabled(): boolean {

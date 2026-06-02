@@ -37,46 +37,63 @@ impl CommandExecutor {
             return Err("current command is not executing".to_string());
         }
 
-        let handle = self
-            .fe_masters
-            .get_or_spawn(session_id, session.name.clone(), session.host.clone())
-            .await?;
-        let mut rx = handle.subscribe();
+        let execution: Result<(), String> = async {
+            let handle = self
+                .fe_masters
+                .get_or_spawn(session_id, session.name.clone(), session.host.clone())
+                .await?;
+            let mut rx = handle.subscribe();
 
-        let injector = MarkerInjector::new();
-        let (wrapped_command, nonce) = injector.inject(&current.command);
-        let send_status = remote_tmux::run_tmux_status_async(
-            &session.host,
-            &["send-keys", "-t", &session.name, &wrapped_command, "Enter"],
+            let injector = MarkerInjector::new();
+            let (wrapped_command, nonce) = injector.inject(&current.command);
+            inject_wrapped_command(&session.host, &session.name, &wrapped_command).await?;
+
+            let (exit_code, raw_output) = wait_for_completion(&mut rx, &nonce).await?;
+            let output = extract_command_output(&raw_output, &nonce, exit_code);
+            let resolved_by = if session.yolo { "yolo" } else { "human" };
+            self.session_manager
+                .complete_command(session_id, exit_code, output, resolved_by)
+                .map_err(|err| format!("failed to complete command: {err:?}"))?;
+            Ok(())
+        }
+        .await;
+
+        if let Err(err) = execution {
+            let _ = self.session_manager.fail_command(session_id, err.clone());
+            return Err(err);
+        }
+
+        Ok(())
+    }
+}
+
+async fn inject_wrapped_command(host: &str, session_name: &str, wrapped_command: &str) -> Result<(), String> {
+    let literal_send = if remote_tmux::is_local_host(host) {
+        remote_tmux::run_tmux_status_async(host, &["send-keys", "-l", "-t", session_name, wrapped_command])
+            .await
+            .map_err(|err| format!("send-keys -l failed: {err}"))?
+    } else {
+        remote_tmux::run_tmux_shell_status_async(
+            host,
+            &["send-keys", "-l", "-t", session_name, wrapped_command],
         )
         .await
-        .map_err(|err| format!("send-keys failed: {err}"))?;
+        .map_err(|err| format!("remote shell send-keys -l failed: {err}"))?
+    };
 
-        if !send_status.success() {
-            let _ = self
-                .session_manager
-                .fail_command(session_id, "command injection failed".to_string());
-            return Err(format!("send-keys exited with {send_status}"));
-        }
-
-        match wait_for_completion(&mut rx, &nonce).await {
-            Ok((exit_code, raw_output)) => {
-                let output = extract_command_output(&raw_output, &nonce, exit_code);
-                let resolved_by = if session.yolo { "yolo" } else { "human" };
-                let _ = self.session_manager.complete_command(
-                    session_id,
-                    exit_code,
-                    output,
-                    resolved_by,
-                );
-                Ok(())
-            }
-            Err(err) => {
-                let _ = self.session_manager.fail_command(session_id, err.clone());
-                Err(err)
-            }
-        }
+    if !literal_send.success() {
+        return Err(format!("send-keys -l exited with {literal_send}"));
     }
+
+    let enter_send = remote_tmux::run_tmux_status_async(host, &["send-keys", "-t", session_name, "Enter"])
+        .await
+        .map_err(|err| format!("send-keys Enter failed: {err}"))?;
+
+    if !enter_send.success() {
+        return Err(format!("send-keys Enter exited with {enter_send}"));
+    }
+
+    Ok(())
 }
 
 async fn wait_for_completion(
@@ -177,5 +194,14 @@ mod tests {
             extract_command_output(&raw_output, &nonce, exit_code),
             "hello world\n"
         );
+    }
+
+    #[test]
+    fn extract_command_output_falls_back_to_raw_when_markers_missing() {
+        let (_, nonce) = MarkerInjector::new().inject("echo hello");
+
+        let output = extract_command_output(b"literal output\n", &nonce, 0);
+
+        assert_eq!(output, "literal output\n");
     }
 }
