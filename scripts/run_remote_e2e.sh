@@ -12,5 +12,5 @@ trap cleanup EXIT
 "${TARGET_SCRIPT}" start
 
 pushd "${ROOT_DIR}/frontend" >/dev/null
-SHUSH_E2E_REMOTE=1 npm run test:e2e
+SHUSH_E2E_REMOTE=1 SHUSH_E2E_ASSERT_STREAM=1 npm run test:e2e
 popd >/dev/null
