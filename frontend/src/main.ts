@@ -5,10 +5,15 @@ const app = document.getElementById("app");
 if (!app) throw new Error("no #app element found");
 
 const path = window.location.pathname;
-const monitorMatch = path.match(/^\/monitor\/([^/]+)$/);
+const monitorMatch = path.match(/^\/monitor(?:\/([^/]+))?\/?$/);
 
-if (monitorMatch) {
-  renderMonitor(app, decodeURIComponent(monitorMatch[1]));
+if (path === "/") {
+  renderMonitor(app);
+} else if (monitorMatch) {
+  renderMonitor(
+    app,
+    monitorMatch[1] ? decodeURIComponent(monitorMatch[1]) : undefined,
+  );
 } else {
   renderDashboard(app);
 }

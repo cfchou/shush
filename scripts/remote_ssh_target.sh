@@ -10,6 +10,10 @@ PUB_FILE="${KEY_FILE}.pub"
 HOME_DIR="${ROOT_DIR}/.remote-ssh-home"
 SSH_CONFIG="${HOME_DIR}/.ssh/config"
 
+ssh_config_quote() {
+  printf '"%s"' "${1//\"/\\\"}"
+}
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [start|stop|restart|cleanup]
@@ -48,12 +52,14 @@ start_target() {
 
   mkdir -p "${HOME_DIR}/.ssh"
   chmod 700 "${HOME_DIR}/.ssh"
+  local identity_file_quoted
+  identity_file_quoted="$(ssh_config_quote "${KEY_FILE}")"
   cat > "${SSH_CONFIG}" <<CFG
 Host shush-docker
   HostName 127.0.0.1
   User shush
   Port ${PORT}
-  IdentityFile ${KEY_FILE}
+  IdentityFile ${identity_file_quoted}
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
 CFG
