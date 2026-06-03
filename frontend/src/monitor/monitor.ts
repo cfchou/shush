@@ -374,7 +374,7 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
     `;
   }
 
-  function updateShellShell(): void {
+  function updateShellLayout(): void {
     const width = window.innerWidth;
     const shouldHideLeft = width < AUTO_HIDE_LEFT_PX && !state.leftPinnedOpen;
     const shouldHideRight =
@@ -399,17 +399,17 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
   function toggleLeftSidebar(): void {
     state.leftCollapsed = !state.leftCollapsed;
     state.leftPinnedOpen = !state.leftCollapsed;
-    updateShellShell();
+    updateShellLayout();
   }
 
   function toggleRightSidebar(): void {
     state.rightCollapsed = !state.rightCollapsed;
     state.rightPinnedOpen = !state.rightCollapsed;
-    updateShellShell();
+    updateShellLayout();
   }
 
   function syncSidebarFromResize(): void {
-    updateShellShell();
+    updateShellLayout();
   }
 
   let terminal: TerminalView | null = null;
