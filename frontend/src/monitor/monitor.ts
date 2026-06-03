@@ -521,9 +521,11 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
       state.sessions = await listSessions();
       renderSessionList();
     } catch (err) {
-      sessionListEl.innerHTML = `<p class="monitor-error">
-        Failed to load sessions: ${(err as Error).message}
-      </p>`;
+      const p = document.createElement("p");
+      p.className = "monitor-error";
+      p.textContent = `Failed to load sessions: ${(err as Error).message}`;
+      sessionListEl.innerHTML = "";
+      sessionListEl.appendChild(p);
     }
   }
 
