@@ -299,7 +299,7 @@ export function renderMonitor(root: HTMLElement, sessionId?: string): void {
   function renderSessionItem(session: Session): string {
     const isActive = state.activeSessionId === session.id;
     const isBusy = session.state === "pending" || session.state === "executing";
-    const itemText = `${session.name} · ${relativeTimeFromNow(session.created_at)}`;
+    const itemText = `${escapeHtml(session.name)} · ${relativeTimeFromNow(session.created_at)}`;
     return `
       <a
         href="/monitor/${encodeURIComponent(session.id)}"
