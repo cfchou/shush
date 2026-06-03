@@ -22,7 +22,10 @@
     8px 24px;
 }
 
-* {
+.monitor-page,
+.monitor-page *,
+.monitor-page *::before,
+.monitor-page *::after {
   box-sizing: border-box;
 }
 
