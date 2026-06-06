@@ -6,14 +6,11 @@ ROOT_DIR := $(CURDIR)
 REMOTE_TARGET_CMD := ./scripts/remote_ssh_target.sh
 SHUSH_E2E_CONTAINER ?= shush-remote-ssh
 SHUSH_E2E_REMOTE_HOST ?= shush-docker
-SHUSH_E2E_REMOTE_HOME ?= $(ROOT_DIR)/.remote-ssh-home
-SHUSH_SSH_CONFIG ?= $(SHUSH_E2E_REMOTE_HOME)/.ssh/config
 
 # Container as remote for testing
 REMOTE_ENVS := \
-	SHUSH_E2E_REMOTE_HOST="$(SHUSH_E2E_REMOTE_HOST)" \
-	SHUSH_E2E_REMOTE_HOME="$(SHUSH_E2E_REMOTE_HOME)" \
-	SHUSH_SSH_CONFIG="$(SHUSH_SSH_CONFIG)"
+	SHUSH_E2E_CONTAINER="$(SHUSH_E2E_CONTAINER)" \
+	SHUSH_E2E_REMOTE_HOST="$(SHUSH_E2E_REMOTE_HOST)"
 
 # E2E tests using container as remote
 E2E_ENVS := \
@@ -21,9 +18,6 @@ E2E_ENVS := \
 	SHUSH_E2E_ASSERT_STREAM=1 \
 	$(REMOTE_ENVS)
 
-# Server env for dev
-SERVER_ENVS := \
-	SHUSH_SSH_CONFIG="$(SHUSH_SSH_CONFIG)"
 
 install:
 	cd frontend && npm install
@@ -61,4 +55,4 @@ dev: build
 	trap 'cleanup 130' INT; \
 	trap 'cleanup 143' TERM; \
 	$(REMOTE_ENVS) $(REMOTE_TARGET_CMD) restart; \
-	$(SERVER_ENVS) cargo run -- server --port $(PORT)
+	cargo run -- server --port $(PORT)

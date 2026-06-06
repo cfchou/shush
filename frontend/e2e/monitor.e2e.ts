@@ -203,16 +203,23 @@ test("monitor shell renders and sidebar toggles", async ({ page }) => {
 
 test("monitor sidebar session click opens selected session in center shell", async ({ page }) => {
   const backend: Backend = { kind: "local", host: "", label: "sidebar-nav-a" };
-  const first = await createSession(runtime.baseUrl(), backend);
-  const second = await createSession(runtime.baseUrl(), {
-    kind: "local",
-    host: "",
-    label: "sidebar-nav-b",
-  });
+  let first: Session | undefined;
+  let second: Session | undefined;
 
   try {
+    first = await createSession(runtime.baseUrl(), backend);
+    second = await createSession(runtime.baseUrl(), {
+      kind: "local",
+      host: "",
+      label: "sidebar-nav-b",
+    });
+
     const seed = `sidebar-target-${randomUUID().slice(0, 8)}`;
-    await sendVisibleLine({ kind: "local", host: "", label: "sidebar-nav-b" }, second.name, seed);
+    await sendVisibleLine(
+      { kind: "local", host: "", label: "sidebar-nav-b" },
+      second.name,
+      seed,
+    );
 
     await installWsProbe(page);
     await page.setViewportSize({ width: 1900, height: 1200 });
@@ -236,8 +243,8 @@ test("monitor sidebar session click opens selected session in center shell", asy
       await expect.poll(() => streamContains(page, seed)).toBe(true);
     }
   } finally {
-    await deleteSession(runtime.baseUrl(), first.id);
-    await deleteSession(runtime.baseUrl(), second.id);
+    if (first) await deleteSession(runtime.baseUrl(), first.id);
+    if (second) await deleteSession(runtime.baseUrl(), second.id);
   }
 });
 
@@ -657,11 +664,11 @@ function isStreamAssertEnabled(): boolean {
 }
 
 function remoteHomeDir(): string {
-  return process.env.SHUSH_E2E_REMOTE_HOME ?? path.join(repoRoot, ".remote-ssh-home");
+  return path.join(repoRoot, ".remote-ssh-home");
 }
 
 function remoteSshConfigPath(): string {
-  return process.env.SHUSH_SSH_CONFIG ?? path.join(remoteHomeDir(), ".ssh/config");
+  return path.join(remoteHomeDir(), ".ssh/config");
 }
 
 async function runCommand(command: string, args: string[], cwd: string): Promise<void> {

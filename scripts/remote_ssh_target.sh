@@ -8,8 +8,8 @@ KEY_FILE="${ROOT_DIR}/.remote-ssh-key"
 PUB_FILE="${KEY_FILE}.pub"
 CONTAINER="${SHUSH_E2E_CONTAINER:-shush-remote-ssh}"
 REMOTE_HOST="${SHUSH_E2E_REMOTE_HOST:-shush-docker}"
-REMOTE_HOME="${SHUSH_E2E_REMOTE_HOME:-${ROOT_DIR}/.remote-ssh-home}"
-SSH_CONFIG="${SHUSH_SSH_CONFIG:-${REMOTE_HOME}/.ssh/config}"
+REMOTE_HOME="${ROOT_DIR}/.remote-ssh-home"
+SSH_CONFIG="${REMOTE_HOME}/.ssh/config"
 
 ssh_config_quote() {
   printf '"%s"' "${1//\"/\\\"}"

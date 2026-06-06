@@ -42,8 +42,7 @@
   - `SHUSH_E2E_REMOTE=1`
   - `SHUSH_E2E_ASSERT_STREAM=1`
   - `SHUSH_E2E_REMOTE_HOST=shush-docker`
-  - `SHUSH_SSH_CONFIG=<repo>/.remote-ssh-home/.ssh/config`
-  - `SHUSH_E2E_REMOTE_HOME=<repo>/.remote-ssh-home`
+  - `SHUSH_E2E_CONTAINER=shush-remote-ssh`
 
 ## High-signal commands
 
@@ -56,4 +55,3 @@
 - Frontend:
   - `cd frontend && npm run test`
   - `cd frontend && npm run test -- <path-or-pattern>` (single Vitest target)
-
