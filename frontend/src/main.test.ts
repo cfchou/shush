@@ -44,20 +44,17 @@ describe("main route dispatch", () => {
     await import("./main");
   }
 
-  it("renders idle monitor scaffold on root", async () => {
+  it("renders dashboard on root", async () => {
     await bootstrapForPath("/");
 
-    expect(renderMonitorMock).toHaveBeenCalledTimes(1);
-    expect(renderMonitorMock).toHaveBeenCalledWith(expect.any(HTMLDivElement));
-    expect(renderDashboardMock).not.toHaveBeenCalled();
+    expect(renderDashboardMock).toHaveBeenCalledTimes(1);
+    expect(renderMonitorMock).not.toHaveBeenCalled();
     expect(
-      document
-        .querySelector(".monitor-page-placeholder")
-        ?.getAttribute("data-session"),
-    ).toBe("none");
+      document.querySelector(".dashboard-page-placeholder"),
+    ).not.toBeNull();
   });
 
-  it("renders dashboard for non-monitor, non-root paths", async () => {
+  it("renders dashboard for non-monitor paths", async () => {
     await bootstrapForPath("/unknown-route");
 
     expect(renderDashboardMock).toHaveBeenCalledTimes(1);

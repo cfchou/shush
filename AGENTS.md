@@ -34,35 +34,26 @@
   - anything else -> dashboard page
 - Server can serve UI directly from `frontend/dist`, but Vite dev (`npm run dev`) proxies `/api` to `127.0.0.1:8100`.
 
+## Installation and full test
+
+- `make install`
+- `make e2e`
+- Frontend E2E defaults:
+  - `SHUSH_E2E_REMOTE=1`
+  - `SHUSH_E2E_ASSERT_STREAM=1`
+  - `SHUSH_E2E_REMOTE_HOST=shush-docker`
+  - `SHUSH_SSH_CONFIG=<repo>/.remote-ssh-home/.ssh/config`
+  - `SHUSH_E2E_REMOTE_HOME=<repo>/.remote-ssh-home`
+
 ## High-signal commands
 
 - Rust backend:
-  - `cargo check --workspace`
-  - `cargo fmt -p shush-core`
-  - `cargo fmt -p shush-bin`
-  - `taplo fmt`
-  - `cargo machete`
   - `cargo test --verbose`
   - `cargo clippy --workspace --all-targets --all-features`
 - Targeted verification:
   - `cargo test -p shush-core`
   - `cargo test -p shush-bin -- <test_filter>`
 - Frontend:
-  - `cd frontend && npm install`
-  - `cd frontend && npm run build` (required before backend static serving checks)
   - `cd frontend && npm run test`
   - `cd frontend && npm run test -- <path-or-pattern>` (single Vitest target)
-  - `cd frontend && npm run lint`
-  - `cd frontend && npm run format:check`
-  - `cd frontend && npm run test:e2e` (Playwright; runs `frontend/e2e/*.e2e.ts`)
 
-## E2E and remote coverage
-
-- Full remote coverage helper: `./scripts/run_remote_e2e.sh` (starts/stops SSH target and runs Playwright with remote/assert flags).
-- Remote target lifecycle helper: `./scripts/remote_ssh_target.sh` (`start|stop|restart|cleanup`).
-- Frontend E2E defaults in-repo:
-  - `SHUSH_E2E_REMOTE=1`
-  - `SHUSH_E2E_ASSERT_STREAM=1`
-  - `SHUSH_E2E_REMOTE_HOST=shush-docker`
-  - `SHUSH_SSH_CONFIG=<repo>/.remote-ssh-home/.ssh/config`
-  - `SHUSH_E2E_REMOTE_HOME=<repo>/.remote-ssh-home`

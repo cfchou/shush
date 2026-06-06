@@ -3,12 +3,13 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE="shush-remote-ssh:dev"
-CONTAINER="shush-remote-ssh"
 PORT="2222"
 KEY_FILE="${ROOT_DIR}/.remote-ssh-key"
 PUB_FILE="${KEY_FILE}.pub"
-HOME_DIR="${ROOT_DIR}/.remote-ssh-home"
-SSH_CONFIG="${HOME_DIR}/.ssh/config"
+CONTAINER="${SHUSH_E2E_CONTAINER:-shush-remote-ssh}"
+REMOTE_HOST="${SHUSH_E2E_REMOTE_HOST:-shush-docker}"
+REMOTE_HOME="${SHUSH_E2E_REMOTE_HOME:-${ROOT_DIR}/.remote-ssh-home}"
+SSH_CONFIG="${SHUSH_SSH_CONFIG:-${REMOTE_HOME}/.ssh/config}"
 
 ssh_config_quote() {
   printf '"%s"' "${1//\"/\\\"}"
@@ -41,8 +42,8 @@ stop_container() {
 cleanup_all() {
   stop_container
   rm -f "${KEY_FILE}" "${PUB_FILE}" >/dev/null 2>&1 || true
-  rm -rf "${HOME_DIR}" >/dev/null 2>&1 || true
-  echo "Removed generated SSH artifacts: ${KEY_FILE}, ${HOME_DIR}"
+  rm -rf "${REMOTE_HOME}" >/dev/null 2>&1 || true
+  echo "Removed generated SSH artifacts: ${KEY_FILE}, ${REMOTE_HOME}"
 }
 
 start_target() {
@@ -50,12 +51,12 @@ start_target() {
     ssh-keygen -t ed25519 -N "" -f "${KEY_FILE}" -C "shush-remote-dev" >/dev/null
   fi
 
-  mkdir -p "${HOME_DIR}/.ssh"
-  chmod 700 "${HOME_DIR}/.ssh"
+  mkdir -p "${REMOTE_HOME}/.ssh"
+  chmod 700 "${REMOTE_HOME}/.ssh"
   local identity_file_quoted
   identity_file_quoted="$(ssh_config_quote "${KEY_FILE}")"
   cat > "${SSH_CONFIG}" <<CFG
-Host shush-docker
+Host ${REMOTE_HOST}
   HostName 127.0.0.1
   User shush
   Port ${PORT}
@@ -72,18 +73,20 @@ CFG
   docker run -d --name "${CONTAINER}" -p "${PORT}:22" -e "AUTHORIZED_KEY=${AUTHORIZED_KEY}" "${IMAGE}" >/dev/null
 
   for _ in {1..30}; do
-    if ssh -F "${SSH_CONFIG}" shush-docker "echo ok" >/dev/null 2>&1; then
+    if ssh -F "${SSH_CONFIG}" "${REMOTE_HOST}" "echo ok" >/dev/null 2>&1; then
       break
     fi
     sleep 1
   done
 
-  ssh -F "${SSH_CONFIG}" shush-docker "tmux -V >/dev/null"
+  ssh -F "${SSH_CONFIG}" "${REMOTE_HOST}" "tmux -V >/dev/null"
 
   cat <<EOF
 Remote SSH target ready.
 
 SSH config: ${SSH_CONFIG}
+Remote host alias: ${REMOTE_HOST}
+Remote home: ${REMOTE_HOME}
 
 Run remote E2E:
   cd frontend

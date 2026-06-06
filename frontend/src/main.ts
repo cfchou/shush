@@ -7,9 +7,7 @@ if (!app) throw new Error("no #app element found");
 const path = window.location.pathname;
 const monitorMatch = path.match(/^\/monitor(?:\/([^/]+))?\/?$/);
 
-if (path === "/") {
-  renderMonitor(app);
-} else if (monitorMatch) {
+if (monitorMatch) {
   renderMonitor(
     app,
     monitorMatch[1] ? decodeURIComponent(monitorMatch[1]) : undefined,
