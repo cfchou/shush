@@ -31,10 +31,8 @@ To run local-only E2E without remote session coverage, pass:
 SHUSH_E2E_REMOTE=0 npm run test:e2e
 ```
 
-Optional overrides:
+Optional override:
 - `SHUSH_E2E_REMOTE_HOST` (default: `shush-docker`)
-- `SHUSH_SSH_CONFIG` (default: `<repo>/.remote-ssh-home/.ssh/config`)
-- `SHUSH_E2E_REMOTE_HOME` (default: `<repo>/.remote-ssh-home`)
 
 ## Stream-content assertions
 

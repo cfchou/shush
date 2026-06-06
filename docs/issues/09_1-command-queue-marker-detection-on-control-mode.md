@@ -157,7 +157,7 @@ Support / strict-validation changes that may or may not remain after `09_1` is c
 - `frontend/package.json`
 - `frontend/package-lock.json`
   - `@types/node` added for Playwright/TS support code
-- `scripts/run_remote_e2e.sh`
+- `Makefile` `e2e` target
   - currently forces `SHUSH_E2E_ASSERT_STREAM=1`
   - keep if strict monitor-stream validation should remain the default remote E2E mode
   - relax if that is too strict for the normal developer workflow

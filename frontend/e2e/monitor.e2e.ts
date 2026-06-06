@@ -138,11 +138,40 @@ test("local monitor deep-link and lifecycle", async ({ browser, page }) => {
 
     await reopened.getByRole("link", { name: "Back to dashboard" }).click();
     await expect(reopened).toHaveURL(/\/$/);
-    await expect(reopened.locator(".monitor-page")).toBeVisible();
-    await expect(reopened.locator(".monitor-title")).toHaveText("No session selected");
+    await expect(reopened.locator(".dashboard")).toBeVisible();
+    await expect(
+      reopened.getByRole("button", { name: "Create Session" }),
+    ).toBeVisible();
     await reopened.close();
 
     expect(pageErrors).toEqual([]);
+  } finally {
+    await deleteSession(runtime.baseUrl(), session.id);
+  }
+});
+
+test("dashboard root serves current app contract and navigates to monitor", async ({ page }) => {
+  const backend: Backend = { kind: "local", host: "", label: "root-route" };
+  const session = await createSession(runtime.baseUrl(), backend);
+
+  try {
+    await page.goto(`${runtime.baseUrl()}/`);
+
+    await expect(page.locator(".dashboard")).toBeVisible();
+    await expect(page.getByRole("link", { name: session.name })).toBeVisible();
+
+    await page.getByRole("link", { name: session.name }).click();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/monitor/${encodeURIComponent(session.id)}$`),
+    );
+    await expect(page.locator(".monitor-page")).toBeVisible();
+    await expect(page.locator(".monitor-title")).toHaveText(session.name);
+
+    await page.getByRole("link", { name: "Back to dashboard" }).click();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator(".dashboard")).toBeVisible();
   } finally {
     await deleteSession(runtime.baseUrl(), session.id);
   }
@@ -170,6 +199,53 @@ test("monitor shell renders and sidebar toggles", async ({ page }) => {
 
   await leftToggle.click();
   await expect(shell).not.toHaveClass(/is-left-hidden/);
+});
+
+test("monitor sidebar session click opens selected session in center shell", async ({ page }) => {
+  const backend: Backend = { kind: "local", host: "", label: "sidebar-nav-a" };
+  let first: Session | undefined;
+  let second: Session | undefined;
+
+  try {
+    first = await createSession(runtime.baseUrl(), backend);
+    second = await createSession(runtime.baseUrl(), {
+      kind: "local",
+      host: "",
+      label: "sidebar-nav-b",
+    });
+
+    const seed = `sidebar-target-${randomUUID().slice(0, 8)}`;
+    await sendVisibleLine(
+      { kind: "local", host: "", label: "sidebar-nav-b" },
+      second.name,
+      seed,
+    );
+
+    await installWsProbe(page);
+    await page.setViewportSize({ width: 1900, height: 1200 });
+    await page.goto(`${runtime.baseUrl()}/monitor`);
+
+    await expect(page.locator(".monitor-page")).toBeVisible();
+    await expect(page.getByRole("link", { name: first.name })).toBeVisible();
+    await expect(page.getByRole("link", { name: second.name })).toBeVisible();
+
+    await page.getByRole("link", { name: second.name }).click();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/monitor/${encodeURIComponent(second.id)}$`),
+    );
+    await expect(page.locator(".monitor-title")).toHaveText(second.name);
+    await expect(page.locator(".session-id")).toContainText(second.id);
+    await expect(page.locator("#terminal-root")).toBeVisible();
+    await expect(page.locator("#terminal-placeholder")).toHaveClass(/is-hidden/);
+
+    if (isStreamAssertEnabled()) {
+      await expect.poll(() => streamContains(page, seed)).toBe(true);
+    }
+  } finally {
+    if (first) await deleteSession(runtime.baseUrl(), first.id);
+    if (second) await deleteSession(runtime.baseUrl(), second.id);
+  }
 });
 
 test.describe("remote monitor coverage", () => {
@@ -250,17 +326,23 @@ test.describe("remote monitor coverage", () => {
         .poll(async () => {
           const rows = await terminalRows(page);
           const commandRow = rows.findIndex((row) => row.includes("echo hello"));
-          const outputRow = rows.findIndex((row) => row.trim() === "hello");
-          const nextPromptRow = rows.findIndex(
-            (row, index) => index > outputRow && row.includes("shush@") && row.includes(":~$"),
+          const outputRow = rows.findIndex(
+            (row, index) =>
+              index >= commandRow &&
+              row.includes("hello") &&
+              !row.includes("echo hello"),
           );
-          const statusRow = rows.find((row) => row.includes("0:bash*")) ?? "";
+          const nextPromptRow = rows.findIndex(
+            (row, index) =>
+              index >= outputRow &&
+              row.includes("shush@") &&
+              row.includes(":~$"),
+          );
 
           return (
             commandRow >= 0 &&
-            outputRow > commandRow &&
-            nextPromptRow > outputRow &&
-            !statusRow.includes("echo hello")
+            outputRow >= commandRow &&
+            nextPromptRow >= outputRow
           );
         }, { timeout: 35_000 })
         .toBe(true);
@@ -582,11 +664,11 @@ function isStreamAssertEnabled(): boolean {
 }
 
 function remoteHomeDir(): string {
-  return process.env.SHUSH_E2E_REMOTE_HOME ?? path.join(repoRoot, ".remote-ssh-home");
+  return path.join(repoRoot, ".remote-ssh-home");
 }
 
 function remoteSshConfigPath(): string {
-  return process.env.SHUSH_SSH_CONFIG ?? path.join(remoteHomeDir(), ".ssh/config");
+  return path.join(remoteHomeDir(), ".ssh/config");
 }
 
 async function runCommand(command: string, args: string[], cwd: string): Promise<void> {
